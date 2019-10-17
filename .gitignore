@@ -1,0 +1,7 @@
+data
+models
+notebooks
+raw
+results
+__pycache__
+.idea
