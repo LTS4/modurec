@@ -9,7 +9,7 @@ def create_recom_data(args, is_toy=False):
     path_toy = os.path.join(args.data_path, 'toy_data.pkl')
     if (not is_toy) or (is_toy and not os.path.exists(path_toy)):
         if not os.path.exists(path_data):
-            recom_data = RecommenderDataset(ROOT_PATH, 'ml-1m')
+            recom_data = RecommenderDataset(args, 'ml-1m')
             with open(path_data, 'wb') as f:
                 pickle.dump(recom_data, f)
         else:

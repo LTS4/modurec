@@ -129,6 +129,7 @@ class RecommenderDataset(object):
         }[self.name]
 
     def preprocess_item_features_ml1m(self):
+        # Need to execute first "import standfordnlp; stanfordnlp.download('en', force=True)"
         all_genres = ['Action', 'Adventure', 'Animation', "Children's", 'Comedy',
                       'Crime', 'Documentary', 'Drama', 'Fantasy',
                       'Film-Noir', 'Horror', 'Musical', 'Mystery', 'Romance',
@@ -137,8 +138,6 @@ class RecommenderDataset(object):
 
         # For movie title
         nlp = stanfordnlp.Pipeline(use_gpu=False, processors='tokenize,lemma')
-        if not os.path.exists(nlp.config['models_dir']):
-            stanfordnlp.download('en')
         vocab = set()
         title_words = []
 

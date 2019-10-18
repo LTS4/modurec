@@ -6,16 +6,17 @@ from torch_geometric.nn import MessagePassing
 
 
 class RecomConv(MessagePassing):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, args):
         super(RecomConv, self).__init__(aggr='add')  # "Add" aggregation.
-        self.weight_sim = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels)), gain=1)
-        self.weight_rat = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels)), gain=1)
-        self.weight_self = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels)), gain=1)
+        self.weight_sim = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
+        self.weight_rat = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
+        self.weight_self = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
 
-        self.bias = zeros_(Parameter(torch.Tensor(out_channels)))
+        self.bias = zeros_(Parameter(torch.Tensor(out_channels).to(args.device)))
 
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.args = args
 
     @staticmethod
     def norm(edge_index, num_nodes, edge_weight=None, dtype=None, symmetric=True):
@@ -58,10 +59,10 @@ class RecomConv(MessagePassing):
 
 
 class BilinearDecoder(torch.nn.Module):
-    def __init__(self, emb_size, mean_rating):
+    def __init__(self, emb_size, mean_rating, args):
         super(BilinearDecoder, self).__init__()
-        self.Q = Parameter(torch.eye(emb_size))
-        self.bias = Parameter(torch.Tensor([mean_rating]))
+        self.Q = Parameter(torch.eye(emb_size).to(args.device))
+        self.bias = Parameter(torch.Tensor([mean_rating]).to(args.device))
 
     def forward(self, h1, h2):
         return torch.sum((h1 @ self.Q) * h2, dim=1) + self.bias

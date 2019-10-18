@@ -26,7 +26,7 @@ def train():
     recom_data = create_recom_data(args, is_toy=TOY)
 
     n_ratings = len(recom_data.rating_graph.edge_index[0]) // 2
-    train_mask, val_mask = train_test_split(list(range(n_ratings)), test_size=0.2)
+    train_mask, val_mask = train_test_split(list(range(n_ratings)), test_size=0.1, random_state=1)
 
     ratings = recom_data.ratings.reset_index(drop=True)
 
@@ -35,7 +35,8 @@ def train():
         'edge_sim': recom_data.similar_graph.edge_index.to(args.device),
         'edge_rat': recom_data.rating_graph.edge_index.to(args.device),
         'x': recom_data.similar_graph.x.to(args.device),
-        'ratings': ratings.loc[train_mask]
+        'ratings': ratings.loc[train_mask],
+        'args': args
     }
     model = RecomNet(**params)
     optimizer = optim.Adam(model.parameters(), args.lr, weight_decay=5e-4)
@@ -44,31 +45,34 @@ def train():
 
     training_results = pd.DataFrame()
     validation_results = pd.DataFrame()
-
+    epoch_size = len(train_mask)  # // 4 + 1
     for epoch in range(args.epochs):
         t0 = time.time()
         # Training
         model.train()
-        batch_size = 32
-        for n_batch, i in enumerate(range(0, len(train_mask), batch_size)):
+        batch_size = epoch_size
+        training_loss = 0
+        for n_batch, i in enumerate(range(0, epoch_size, batch_size)):
             t1 = time.time()
             optimizer.zero_grad()
             train_batch = train_mask[i:i + batch_size]
             pred_rating = model(train_batch)
-            real_rating = torch.tensor(ratings.rating.loc[train_batch].values, dtype=torch.float)
+            real_rating = torch.tensor(ratings.rating.loc[train_batch].values, dtype=torch.float).to(args.device)
             train_loss = F.mse_loss(pred_rating, real_rating)
             train_loss.backward()
             training_results = training_results.append(
                 {'epoch': epoch + i / len(train_mask),
                  'train_mse': train_loss.item()},
                 ignore_index=True)
+            training_loss += train_loss
             optimizer.step()
-            print(f"Batch: {n_batch}  --- train_mse={train_loss:.2f}, time={time.time() - t1}")
+            # print(f"Batch: {n_batch}  --- train_mse={train_loss:.2f}, time={time.time() - t1}")
+        training_loss /= (n_batch + 1)
         # Validation
         model.eval()
         with torch.no_grad():
             pred_rating = model(val_mask)
-            real_rating = torch.tensor(ratings.rating.iloc[val_mask].values, dtype=torch.float)
+            real_rating = torch.tensor(ratings.rating.iloc[val_mask].values, dtype=torch.float).to(args.device)
             val_loss = F.mse_loss(pred_rating, real_rating)
             if args.early_stopping:
                 if earlyS.step(val_loss.cpu().numpy()):
@@ -77,7 +81,7 @@ def train():
                 {'epoch': epoch,
                  'train_mse': val_loss.item()},
                 ignore_index=True)
-        print(f"Epoch: {epoch}  --- train_mse={train_loss:.2f}, val_mse={val_loss:.2f}, time={time.time() - t0}")
+        print(f"Epoch: {epoch}  --- train_mse={training_loss:.2f}, val_mse={val_loss:.2f}, time={time.time() - t0}")
 
     # Save models
     torch.save(model.state_dict(), os.path.join(args.models_path, 'recom_model.pt'))

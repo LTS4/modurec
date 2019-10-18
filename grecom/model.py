@@ -6,16 +6,16 @@ from grecom.layers import RecomConv, BilinearDecoder
 
 
 class RecomNet(torch.nn.Module):
-    def __init__(self, in_layers, edge_sim, edge_rat, x, ratings):
+    def __init__(self, in_layers, edge_sim, edge_rat, x, ratings, args):
         super(RecomNet, self).__init__()
         self.edge_sim = edge_sim
         self.edge_rat = edge_rat
         self.x = x
         self.ratings = ratings
 
-        self.conv1 = RecomConv(in_layers, 200)
-        self.conv2 = RecomConv(200, 200)
-        self.decoder = BilinearDecoder(200, ratings.rating.mean())
+        self.conv1 = RecomConv(in_layers, 200, args)
+        self.conv2 = RecomConv(200, 200, args)
+        self.decoder = BilinearDecoder(200, ratings.rating.mean(), args)
 
     def forward(self, mask):
         x = self.conv1(self.edge_sim, self.edge_rat, self.x)
