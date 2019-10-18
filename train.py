@@ -2,6 +2,8 @@ import os
 import pickle
 
 import time
+
+import pandas as pd
 import torch
 from torch import optim
 import torch.nn.functional as F
@@ -23,7 +25,7 @@ def train():
     torch.set_num_threads(6)
 
     # Load graph
-    recom_data = create_recom_data(is_toy=TOY)
+    recom_data = create_recom_data(args, is_toy=TOY)
 
     model = RecomNet(recom_data.n_users + recom_data.n_items)
     decoder = Decoder(200, recom_data.ratings.rating.mean())
@@ -33,8 +35,8 @@ def train():
     if args.early_stopping:
         earlyS = EarlyStopping(mode='min', patience=args.early_stopping)
 
-    training_loss = []
-    validation_loss = []
+    training_results = pd.DataFrame()
+    validation_results = pd.DataFrame()
 
     n_ratings = len(recom_data.rating_graph.edge_index[0]) // 2
     train_mask, val_mask = train_test_split(list(range(n_ratings)))
@@ -60,7 +62,10 @@ def train():
             real_rating = torch.tensor(real_rating, dtype=torch.float)
             train_loss = F.mse_loss(pred_rating, real_rating)
             train_loss.backward()
-            training_loss.append(train_loss)
+            training_results = training_results.append(
+                {'epoch': epoch + i / len(train_mask),
+                 'train_mse': train_loss.item()},
+                ignore_index=True)
             optimizer.step()
             print(f"Batch: {n_batch}  --- train_mse={train_loss:.2f}, time={time.time() - t1}")
         # Validation
@@ -74,18 +79,19 @@ def train():
             if args.early_stopping:
                 if earlyS.step(val_loss.cpu().numpy()):
                     break
-            validation_loss.append(val_loss)
+            validation_results = validation_results.append(
+                {'epoch': epoch,
+                 'train_mse': val_loss.item()},
+                ignore_index=True)
         print(f"Epoch: {epoch}  --- train_mse={train_loss:.2f}, val_mse={val_loss:.2f}, time={time.time() - t0}")
 
     # Save models
-    torch.save(model.state_dict(), os.path.join(ROOT_PATH, 'models', 'recom_model.pt'))
-    torch.save(decoder.state_dict(), os.path.join(ROOT_PATH, 'models', 'recom_decoder.pt'))
+    torch.save(model.state_dict(), os.path.join(args.models_path, 'recom_model.pt'))
+    torch.save(decoder.state_dict(), os.path.join(args.models_path, 'recom_decoder.pt'))
 
     # Save results
-    with open(os.path.join(ROOT_PATH, 'results', 'training_mse.pkl'), 'wb') as f:
-        pickle.dump(training_loss, f)
-    with open(os.path.join(ROOT_PATH, 'results', 'validation_mse.pkl'), 'wb') as f:
-        pickle.dump(validation_loss, f)
+    training_results.to_hdf(os.path.join(args.results_path, 'results.h5'), 'training_results', mode='w')
+    validation_results.to_hdf(os.path.join(args.results_path, 'results.h5'), 'validation_results')
 
 
 if __name__ == "__main__":

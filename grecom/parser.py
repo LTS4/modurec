@@ -26,6 +26,11 @@ def common_parser(parser):
     parser.add_argument('--save-model', action='store_true', default=False)
     parser.add_argument('--save-results', action='store_true', default=False)
     parser.add_argument('--id', type=int, help='identifier of the experiment')
+    # Paths
+    parser.add_argument('--raw-path', type=str, default='/datasets2/recom_heterograph/raw/')
+    parser.add_argument('--data-path', type=str, default='/datasets2/recom_heterograph/data/')
+    parser.add_argument('--models-path', type=str, default='/datasets2/recom_heterograph/models/')
+    parser.add_argument('--results-path', type=str, default='/datasets2/recom_heterograph/results/')
 
 
 def parser_recommender():

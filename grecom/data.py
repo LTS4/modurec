@@ -15,7 +15,7 @@ from math import ceil, log10
 
 
 class RecommenderDataset(object):
-    def __init__(self, root_dir, name):
+    def __init__(self, args, name):
         # Dataset
         self.name = name
         self.n_items = None
@@ -27,9 +27,9 @@ class RecommenderDataset(object):
         assert name in ['ml-100k', 'ml-1m']
 
         # Paths
-        self.root_dir = root_dir
-        self.raw_dir = os.path.join(self.root_dir, 'raw', self.name)
-        self.data_dir = os.path.join(self.root_dir, 'data', self.name)
+        self.args = args
+        self.raw_dir = os.path.join(args.raw_path, self.name)
+        self.data_dir = os.path.join(args.data_path, self.name)
 
         # Download dataset if needed
         if not os.path.exists(self.raw_dir):
@@ -56,9 +56,8 @@ class RecommenderDataset(object):
         }[self.name]
 
     def download(self):
-        path = download_url(self.url, self.root_dir)
-        path_extract = os.path.join(self.root_dir, 'raw')
-        extract_zip(path, path_extract)
+        path = download_url(self.url, self.args.raw_path)
+        extract_zip(path, self.args.raw_path)
         os.unlink(path)
 
     def create_user_graph(self, k=10):

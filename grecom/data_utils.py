@@ -1,13 +1,12 @@
 import os
 import pickle
 
-from grecom.constants import ROOT_PATH
 from grecom.data import RecommenderDataset
 
 
-def create_recom_data(is_toy=False):
-    path_data = os.path.join(ROOT_PATH, 'data', 'recom_data.pkl')
-    path_toy = os.path.join(ROOT_PATH, 'data', 'toy_data.pkl')
+def create_recom_data(args, is_toy=False):
+    path_data = os.path.join(args.data_path, 'recom_data.pkl')
+    path_toy = os.path.join(args.data_path, 'toy_data.pkl')
     if (not is_toy) or (is_toy and not os.path.exists(path_toy)):
         if not os.path.exists(path_data):
             recom_data = RecommenderDataset(ROOT_PATH, 'ml-1m')
