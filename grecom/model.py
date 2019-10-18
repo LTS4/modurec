@@ -2,27 +2,37 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
 
-from grecom.layers import RecomConv
+from grecom.layers import RecomConv, BilinearDecoder
 
 
 class RecomNet(torch.nn.Module):
-    def __init__(self, in_layers):
+    def __init__(self, in_layers, edge_sim, edge_rat, x, ratings):
         super(RecomNet, self).__init__()
+        self.edge_sim = edge_sim
+        self.edge_rat = edge_rat
+        self.x = x
+        self.ratings = ratings
+
         self.conv1 = RecomConv(in_layers, 200)
         self.conv2 = RecomConv(200, 200)
+        self.decoder = BilinearDecoder(200, ratings.rating.mean())
 
-    def forward(self, edge_sim, edge_rat, x):
-        x = self.conv1(edge_sim, edge_rat, x)
+    def forward(self, mask):
+        x = self.conv1(self.edge_sim, self.edge_rat, self.x)
         x = F.relu(x)
-        x = self.conv2(edge_sim, edge_rat, x)
-        return x
+        x = self.conv2(self.edge_sim, self.edge_rat, x)
+        h1 = x[self.edge_rat[0]]
+        h2 = x[self.edge_rat[1]]
+        pred = self.decoder(h1[mask], h2[mask])
+        return pred
 
 
-class Decoder(torch.nn.Module):
-    def __init__(self, emb_size, mean_rating):
-        super(Decoder, self).__init__()
-        self.Q = Parameter(torch.eye(emb_size))
-        self.bias = Parameter(torch.Tensor([mean_rating]))
+class AutographNet(torch.nn.Module):
+    def __init__(self, in_layers, edge_sim, edge_rat, x, ratings):
+        super(AutographNet, self).__init__()
 
-    def forward(self, h1, h2):
-        return torch.sum((h1 @ self.Q) * h2, dim=1) + self.bias
+    def forward(self, mask):
+        pass
+
+
+

@@ -55,3 +55,13 @@ class RecomConv(MessagePassing):
     def __repr__(self):
         return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,
                                    self.out_channels)
+
+
+class BilinearDecoder(torch.nn.Module):
+    def __init__(self, emb_size, mean_rating):
+        super(BilinearDecoder, self).__init__()
+        self.Q = Parameter(torch.eye(emb_size))
+        self.bias = Parameter(torch.Tensor([mean_rating]))
+
+    def forward(self, h1, h2):
+        return torch.sum((h1 @ self.Q) * h2, dim=1) + self.bias
