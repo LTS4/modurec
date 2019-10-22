@@ -2,7 +2,6 @@ import argparse
 
 
 def common_parser(parser):
-    parser.add_argument('--isotropic', action='store_true', default=False)
     parser.add_argument('--experiments', type=int, default=1,
                         help='Number of experiments to average results on')
     # Learning parameters
@@ -19,13 +18,8 @@ def common_parser(parser):
 
     parser.add_argument('--seed', type=int, default=1,
                         help='random seed (default: 1)')
-    # Print
-    parser.add_argument('--log-interval', type=int, default=50,
-                        help='how many batches to wait before logging training status')
     # Save
-    parser.add_argument('--save-model', action='store_true', default=False)
-    parser.add_argument('--save-results', action='store_true', default=False)
-    parser.add_argument('--id', type=int, help='identifier of the experiment')
+    parser.add_argument('--id', type=str, help='identifier of the experiment')
     # Paths
     parser.add_argument('--raw-path', type=str, default='/datasets2/recom_heterograph/raw/')
     parser.add_argument('--data-path', type=str, default='/datasets2/recom_heterograph/data/')
@@ -37,8 +31,8 @@ def parser_recommender():
     parser = argparse.ArgumentParser(description='PyTorch Recommender System')
     parser.add_argument('--dataset', type=str, help='dataset',
                         choices=['movielens100k'])
-    parser.add_argument('--layers', type=int, default=1, help='number of hidden layers')
-    parser.add_argument('--channels', type=int, help='units in the hidden layer', default=16)
+    parser.add_argument('--model', type=str, help='model',
+                        choices=['hetero_gcmc', 'gautorec'])
     common_parser(parser)
     # Parse the arguments
     args = parser.parse_args()

@@ -1,7 +1,6 @@
 import os
 import re
 import string
-import zipfile
 
 import numpy as np
 import pandas as pd
@@ -11,7 +10,6 @@ from sklearn.model_selection import train_test_split
 from torch_geometric.data import download_url, extract_zip, Data
 from torch_geometric.utils import to_undirected, subgraph
 import torch
-from math import ceil, log10
 
 
 class RecommenderDataset(object):
@@ -66,7 +64,8 @@ class RecommenderDataset(object):
         col = [self.users.rel_id[x] for x in A.col]
         return Data(edge_index=torch.tensor([row, col], dtype=torch.long),
                     num_nodes=self.n_users,
-                    ids=self.users.user_id.values)
+                    ids=self.users.user_id.values,
+                    x=torch.eye(self.n_users))
 
     def create_global_indices(self):
         user_ids = np.unique(np.concatenate(
@@ -115,7 +114,8 @@ class RecommenderDataset(object):
         col = [self.items.rel_id[x] for x in A.col]
         return Data(edge_index=torch.tensor([row, col], dtype=torch.long),
                     num_nodes=self.n_items,
-                    ids=self.items.item_id.values)
+                    ids=self.items.item_id.values,
+                    x=torch.eye(self.n_items))
 
     def preprocess_item_features(self):
         """Reads the raw files and generates a feature vector for each item
@@ -202,10 +202,11 @@ class RecommenderDataset(object):
         item_ids = [self.dict_item_ar[x] for x in self.ratings.item_id]
         row = user_ids + item_ids
         col = item_ids + user_ids
+        y = torch.tensor(self.ratings.rating.values, dtype=torch.float)
         return Data(edge_index=torch.tensor([row, col], dtype=torch.long),
                     num_nodes=self.n_items + self.n_users,
                     x=torch.eye(self.n_items + self.n_users),
-                    y=torch.tensor(self.ratings.rating.values, dtype=torch.float))
+                    y=torch.cat([y, y]))
 
     def create_similar_graph(self):
         return Data(edge_index=torch.cat((self.user_graph.edge_index, self.item_graph.edge_index), 1),

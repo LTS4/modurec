@@ -1,4 +1,5 @@
 import torch
+import torch.sparse
 from torch.nn import Parameter
 from torch.nn.init import xavier_normal_, zeros_
 from torch_scatter import scatter_add
@@ -34,6 +35,7 @@ class RecomConv(MessagePassing):
         return left_deg
 
     def forward(self, edge_sim, edge_rat, x):
+        # TODO: improve performance by avoiding recalculation of normalizations
         x_self = torch.matmul(x, self.weight_self)
         x_sim = self.propagate(
             x=torch.matmul(x, self.weight_sim),
@@ -66,3 +68,37 @@ class BilinearDecoder(torch.nn.Module):
 
     def forward(self, h1, h2):
         return torch.sum((h1 @ self.Q) * h2, dim=1) + self.bias
+
+
+class RatingConv(MessagePassing):
+    def __init__(self, args):
+        super(RatingConv, self).__init__(aggr='add')  # "Add" aggregation.
+        self.args = args
+
+    def forward(self, edge_rat, ratings, x):
+        # x : [N, U or V]
+        rat_mat = torch.sparse.LongTensor(
+            torch.LongTensor(edge_rat),
+            torch.FloatTensor(ratings),
+            torch.Size([x.size(0), x.size(0)])
+        )
+        x = self.propagate(
+            x=torch.sparse.mm(rat_mat, x),
+            edge_index=edge_rat)
+        return x
+
+    def message(self, x_j, edge_index):
+        # x_j has shape [E, out_channels]
+        return x_j
+
+    def update(self, aggr_out):
+        # aggr_out has shape [N, out_channels]
+        return aggr_out
+
+    def __repr__(self):
+        return '{}'.format(self.__class__.__name__)
+
+
+class GraphAutoencoder(torch.nn.Module):
+    def __init__(self, edge_sim, edge_rat, x, ratings, args):
+        pass
