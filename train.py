@@ -85,7 +85,7 @@ def train_gae_net(recom_data, train_mask, val_mask, args):
             train_batch = train_mask[i:i + batch_size]
             real, pred = model(train_batch)
             print(model.wenc_v)
-            print(real)
+            print(real[real != 0])
             print(pred)
             train_loss = F.mse_loss(real[real != 0], pred[real != 0])
             train_loss += reg / 2 * (torch.norm(model.wenc_v) ** 2 + torch.norm(model.wdec_v) ** 2)
@@ -111,14 +111,14 @@ def train_gae_net(recom_data, train_mask, val_mask, args):
 def train():
     args = parser_recommender()
     args = common_processing(args)
-    args.device = 'cpu'
     torch.set_num_threads(6)
 
     # Load graph
     recom_data = create_recom_data(args, is_toy=TOY)
 
     n_ratings = len(recom_data.rating_graph.edge_index[0]) // 2
-    train_mask, val_mask = train_test_split(list(range(n_ratings)), test_size=0.1, random_state=1)
+    train_mask, val_mask = train_test_split(np.array(range(n_ratings)), test_size=0.2, random_state=1)
+    val_mask, test_mask = train_test_split(val_mask, test_size=0.5, random_state=1)
     params = {
         'recom_data': recom_data,
         'train_mask': train_mask,
@@ -128,6 +128,8 @@ def train():
     if args.model == 'hetero_gcmc':
         model, results = train_recom_net(**params)
     elif args.model == 'gautorec':
+        params['train_mask'] = np.hstack([train_mask, train_mask + n_ratings])
+        params['val_mask'] = np.hstack([val_mask, val_mask + n_ratings])
         model, results = train_gae_net(**params)
     else:
         raise ValueError
