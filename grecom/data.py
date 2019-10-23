@@ -5,6 +5,7 @@ import string
 import numpy as np
 import pandas as pd
 import stanfordnlp
+from scipy.sparse import coo_matrix
 from sklearn.neighbors import kneighbors_graph
 from sklearn.model_selection import train_test_split
 from torch_geometric.data import download_url, extract_zip, Data
@@ -46,6 +47,8 @@ class RecommenderDataset(object):
         self.user_graph = self.create_user_graph()
         self.item_graph = self.create_item_graph()
         self.similar_graph = self.create_similar_graph()
+
+        self.rating_matrix = self.create_rating_matrix()
 
     def select_url(self):
         return {
@@ -249,3 +252,10 @@ class RecommenderDataset(object):
             df.item_id.isin([self.dict_item_ra[x.item()] for x in new_item_ids]) & df.user_id.isin(
                 [self.dict_user_ra[x.item()] for x in new_user_ids])]
 
+    def create_rating_matrix(self):
+        y = self.rating_graph.y
+        assert len(y) % 2 == 0
+        y = y[:len(y)//2]
+        rating_index = np.array(self.rating_graph.edge_index)[:, :len(y)]
+        rating_index[1, :] = rating_index[1, :] - self.n_users
+        return coo_matrix((y, rating_index), shape=(self.n_users, self.n_items)).toarray()

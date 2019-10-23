@@ -18,7 +18,11 @@ from sklearn.model_selection import train_test_split
 TOY = False
 
 
-def train_recom_net(recom_data, train_mask, val_mask, args):
+def train_recom_net(recom_data, args):
+    n_ratings = len(recom_data.rating_graph.edge_index[0]) // 2
+    train_mask, val_mask = train_test_split(np.array(range(n_ratings)), test_size=0.2, random_state=1)
+    val_mask, test_mask = train_test_split(val_mask, test_size=0.5, random_state=1)
+
     params = {
         'edge_sim': recom_data.similar_graph.edge_index.to(args.device),
         'edge_rat': recom_data.rating_graph.edge_index.to(args.device),
@@ -68,12 +72,19 @@ def train_recom_net(recom_data, train_mask, val_mask, args):
     return model, results
 
 
-def train_gae_net(recom_data, train_mask, val_mask, args):
+def train_gae_net(recom_data, args):
+    # Create masks
+    non_zero = np.where(recom_data.rating_matrix != 0)
+    train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2, random_state=1)
+    val_inds, test_inds = train_test_split(val_inds, test_size=0.5, random_state=1)
+
     model = GAENet(recom_data, args)
     optimizer = optim.Rprop(model.parameters())
     results = pd.DataFrame()
-    epoch_size = len(train_mask)
+    epoch_size = len(train_inds)
     reg = 0.001
+    val_mask = np.zeros_like(recom_data.rating_matrix)
+    val_mask[tuple(val_inds.T)] = 1
     for epoch in range(100000):
         t0 = time.time()
         # Training
@@ -82,13 +93,12 @@ def train_gae_net(recom_data, train_mask, val_mask, args):
         training_loss = 0
         for n_batch, i in enumerate(range(0, epoch_size, batch_size)):
             optimizer.zero_grad()
-            train_batch = train_mask[i:i + batch_size]
-            real, pred = model(train_batch)
-            print(model.wenc_v)
-            print(real[real != 0])
-            print(pred)
+            train_batch = train_inds[i:i + batch_size]
+            train_mask = np.zeros_like(recom_data.rating_matrix)
+            train_mask[tuple(train_batch.T)] = 1
+            real, pred = model(train_mask)
             train_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            train_loss += reg / 2 * (torch.norm(model.wenc_v) ** 2 + torch.norm(model.wdec_v) ** 2)
+            train_loss += reg / 2 * (torch.norm(model.wenc) ** 2 + torch.norm(model.wdec) ** 2)
             train_loss.backward()
             training_loss += train_loss
             optimizer.step()
@@ -103,8 +113,8 @@ def train_gae_net(recom_data, train_mask, val_mask, args):
                  'train_rmse': training_loss ** (1/2),
                  'val_rmse': val_loss.item() ** (1/2)},
                 ignore_index=True)
-        print(f"Epoch: {epoch}  --- train_mse={training_loss ** (1/2):.3f}, "
-              f"val_rmse={val_loss.item() ** (1/2):.3f}, time={time.time() - t0:.2f}")
+            print(f"Epoch: {epoch}  --- train_mse={training_loss ** (1/2):.3f}, "
+                  f"val_rmse={val_loss.item() ** (1/2):.3f}, time={time.time() - t0:.2f}")
     return model, results
 
 
@@ -116,20 +126,13 @@ def train():
     # Load graph
     recom_data = create_recom_data(args, is_toy=TOY)
 
-    n_ratings = len(recom_data.rating_graph.edge_index[0]) // 2
-    train_mask, val_mask = train_test_split(np.array(range(n_ratings)), test_size=0.2, random_state=1)
-    val_mask, test_mask = train_test_split(val_mask, test_size=0.5, random_state=1)
     params = {
         'recom_data': recom_data,
-        'train_mask': train_mask,
-        'val_mask': val_mask,
         'args': args
     }
     if args.model == 'hetero_gcmc':
         model, results = train_recom_net(**params)
     elif args.model == 'gautorec':
-        params['train_mask'] = np.hstack([train_mask, train_mask + n_ratings])
-        params['val_mask'] = np.hstack([val_mask, val_mask + n_ratings])
         model, results = train_gae_net(**params)
     else:
         raise ValueError
