@@ -36,5 +36,4 @@ def parser_recommender():
     common_parser(parser)
     # Parse the arguments
     args = parser.parse_args()
-    assert args.layers > 0, "The model should have at least 1 hidden layer"
     return args

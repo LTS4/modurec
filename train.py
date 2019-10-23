@@ -65,16 +65,16 @@ def train_recom_net(recom_data, train_mask, val_mask, args):
                 ignore_index=True)
         print(f"Epoch: {epoch}  --- train_mse={np.sqrt(training_loss):.3f}, "
               f"val_rmse={np.sqrt(val_loss.item()):.3f}, time={time.time() - t0:.2f}")
-        return model, results
+    return model, results
 
 
 def train_gae_net(recom_data, train_mask, val_mask, args):
-    model = GAENet(recom_data, args).to(args.device)
+    model = GAENet(recom_data, args)
     optimizer = optim.Rprop(model.parameters())
     results = pd.DataFrame()
     epoch_size = len(train_mask)
-    reg = 0.01
-    for epoch in range(500):
+    reg = 0.001
+    for epoch in range(100000):
         t0 = time.time()
         # Training
         model.train()
@@ -84,10 +84,13 @@ def train_gae_net(recom_data, train_mask, val_mask, args):
             optimizer.zero_grad()
             train_batch = train_mask[i:i + batch_size]
             real, pred = model(train_batch)
+            print(model.wenc_v)
+            print(real)
+            print(pred)
             train_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            training_loss += train_loss.detach().numpy()
-            train_loss += reg / 2 * (torch.norm(model.item_enc.weight) ** 2 + torch.norm(model.item_dec.weight) ** 2)
+            train_loss += reg / 2 * (torch.norm(model.wenc_v) ** 2 + torch.norm(model.wdec_v) ** 2)
             train_loss.backward()
+            training_loss += train_loss
             optimizer.step()
         training_loss /= (n_batch + 1)
         # Validation
@@ -97,17 +100,18 @@ def train_gae_net(recom_data, train_mask, val_mask, args):
             val_loss = F.mse_loss(real[real != 0], pred[real != 0])
             results = results.append(
                 {'epoch': epoch,
-                 'train_rmse': np.sqrt(training_loss),
-                 'val_rmse': np.sqrt(val_loss.item())},
+                 'train_rmse': training_loss ** (1/2),
+                 'val_rmse': val_loss.item() ** (1/2)},
                 ignore_index=True)
-        print(f"Epoch: {epoch}  --- train_mse={np.sqrt(training_loss):.3f}, "
-              f"val_rmse={np.sqrt(val_loss.item()):.3f}, time={time.time() - t0:.2f}")
-        return model, results
+        print(f"Epoch: {epoch}  --- train_mse={training_loss ** (1/2):.3f}, "
+              f"val_rmse={val_loss.item() ** (1/2):.3f}, time={time.time() - t0:.2f}")
+    return model, results
 
 
 def train():
     args = parser_recommender()
     args = common_processing(args)
+    args.device = 'cpu'
     torch.set_num_threads(6)
 
     # Load graph
