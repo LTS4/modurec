@@ -87,7 +87,7 @@ def train_gae_net(recom_data, args):
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
-    for epoch in range(1000):
+    for epoch in range(args.epochs):
         t0 = time.time()
         # Training
         model.train()

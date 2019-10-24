@@ -79,7 +79,7 @@ class GraphAutoencoder(torch.nn.Module):
         super(GraphAutoencoder, self).__init__()
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
-        self.conv = GraphConv(emb_size, emb_size, bias=False)
+        self.conv = GraphConv(emb_size, emb_size, bias=False).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
