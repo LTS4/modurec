@@ -94,8 +94,8 @@ class GraphAutoencoder(torch.nn.Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
 
-    def forward(self, x):
+    def forward(self, x, edge_index):
         h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
-        h = self.conv(h)
+        h = self.conv(h, edge_index)
         p = F.linear(h, self.wdec, self.bdec)
         return p

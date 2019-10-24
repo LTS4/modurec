@@ -37,7 +37,6 @@ class GAENet(torch.nn.Module):
     def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
 
-        # Item autoencoder
         self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size)
         self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size)
 
@@ -49,6 +48,9 @@ class GAENet(torch.nn.Module):
 
         self.mean_rating = self.x_train[self.x_train != 0].mean()
 
+        self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
+        self.edge_index_v = recom_data.item_graph.edge_index.to(args.device) - recom_data.n_users
+
         self.args = args
     
     def forward(self, batch=None, train='user', is_val=False):
@@ -57,8 +59,8 @@ class GAENet(torch.nn.Module):
         # Create input features
         x = self.x_train
         if is_val:
-            p_u = nn.Hardtanh(1, 5)(self.user_ae(x))
-            p_v = nn.Hardtanh(1, 5)(self.item_ae(x.T).T)
+            p_u = nn.Hardtanh(1, 5)(self.user_ae(x, self.edge_index_u))
+            p_v = nn.Hardtanh(1, 5)(self.item_ae(x.T, self.edge_index_v).T)
             p_u = input_unseen_uv(self.x_train, self.x_val, p_u, self.mean_rating)
             p_v = input_unseen_uv(self.x_train, self.x_val, p_v, self.mean_rating)
             pred = (p_u + p_v) / 2
@@ -67,12 +69,12 @@ class GAENet(torch.nn.Module):
             if batch is not None:
                 x = x[batch, :]
             reg_loss = self.args.reg / 2 * (torch.norm(self.user_ae.wenc) ** 2 + torch.norm(self.user_ae.wdec) ** 2)
-            return x, self.user_ae(x), reg_loss
+            return x, self.user_ae(x, self.edge_index_u), reg_loss
         elif train == 'item':
             if batch is not None:
                 x = x[:, batch]
             reg_loss = self.args.reg / 2 * (torch.norm(self.item_ae.wenc) ** 2 + torch.norm(self.item_ae.wdec) ** 2)
-            return x, self.item_ae(x.T).T, reg_loss
+            return x, self.item_ae(x.T, self.edge_index_v).T, reg_loss
         else:
             raise ValueError
 
