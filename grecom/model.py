@@ -34,31 +34,34 @@ class GAENet(torch.nn.Module):
     """Graph Autoencoder Network
     """
 
-    def __init__(self, recom_data, args, emb_size=500):
+    def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
 
-        self.x = torch.tensor(recom_data.rating_matrix).to(args.device)
-
         # Item autoencoder
-        self.item_ae = GraphAutoencoder(recom_data.n_users, args)
-        self.user_ae = GraphAutoencoder(recom_data.n_items, args)
+        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size)
+        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size)
+
+        self.train_mask = torch.tensor(train_mask).to(args.device)
+        self.val_mask = torch.tensor(val_mask).to(args.device)
+        self.x = torch.tensor(recom_data.rating_matrix).to(args.device)
+        self.x_train = (self.x * self.train_mask)
+        self.x_val = (self.x * self.val_mask)
 
         self.args = args
     
-    def forward(self, mask=None, val_mask=None):
+    def forward(self, item_batch=None, is_val=False):
         """mask: size 2*E
         """
-        mask = torch.tensor(mask).to(self.args.device)
         # Create input features
-        x = (self.x * mask)
+        x = self.x_train
+        if item_batch is not None:
+            x = x[:, item_batch]
         # p_u = self.user_ae(x)
-        p_v = self.item_ae(x.t()).T
-        if val_mask is not None:
-            val_mask = torch.tensor(val_mask).to(self.args.device)
-            val = (self.x * val_mask)
+        p_v = self.item_ae(x.T).T
+        if is_val:
             # p_u = nn.Hardtanh(1, 5)(p_u)
             p_v = nn.Hardtanh(1, 5)(p_v)
-            [p_v] = input_unseen_uv(x, val, [p_v])
-            return val, p_v
+            p_v = input_unseen_uv(self.x_train, self.x_val, p_v)
+            return self.x_val, p_v
         return x, p_v
 

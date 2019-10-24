@@ -16,6 +16,7 @@ from grecom.utils import common_processing, EarlyStopping
 from sklearn.model_selection import train_test_split
 
 TOY = False
+verbose = False
 
 
 def train_recom_net(recom_data, args):
@@ -78,42 +79,47 @@ def train_gae_net(recom_data, args):
     train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2, random_state=1)
     val_inds, test_inds = train_test_split(val_inds, test_size=0.5, random_state=1)
 
-    model = GAENet(recom_data, args)
-    optimizer = optim.Rprop(model.parameters())
-    results = pd.DataFrame()
-    epoch_size = len(train_inds)
-    reg = 0.001
+    train_mask = np.zeros_like(recom_data.rating_matrix)
+    train_mask[tuple(train_inds.T)] = 1
     val_mask = np.zeros_like(recom_data.rating_matrix)
     val_mask[tuple(val_inds.T)] = 1
+    model = GAENet(recom_data, train_mask, val_mask, args)
+    optimizer = optim.Rprop(model.parameters())
+    results = pd.DataFrame()
+    reg = 0.001
     for epoch in range(1000):
         t0 = time.time()
         # Training
         model.train()
-        batch_size = epoch_size
+        batch_size = 100
         training_loss = 0
-        for n_batch, i in enumerate(range(0, epoch_size, batch_size)):
+        item_inds = list(range(recom_data.n_items))
+        for n_batch, i in enumerate(range(0, recom_data.n_items, batch_size)):
+            t1 = time.time()
             optimizer.zero_grad()
-            train_batch = train_inds[i:i + batch_size]
-            train_mask = np.zeros_like(recom_data.rating_matrix)
-            train_mask[tuple(train_batch.T)] = 1
-            real, pred = model(train_mask)
-            train_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            train_loss += reg / 2 * (torch.norm(model.item_ae.wenc) ** 2 + torch.norm(model.item_ae.wdec) ** 2)
+            item_batch = item_inds[i:i + batch_size]
+            real, pred = model(item_batch)
+            mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+            reg_loss = reg / 2 * (torch.norm(model.item_ae.wenc) ** 2 + torch.norm(model.item_ae.wdec) ** 2)
+            train_loss = mse_loss + reg_loss
             train_loss.backward()
-            training_loss += train_loss
+            training_loss += mse_loss
             optimizer.step()
+            if verbose:
+                print(f"Batch: {n_batch}  --- batch_rmse={mse_loss ** (1 / 2):.3f}, "
+                      f"time={time.time() - t1:.2f}")
         training_loss /= (n_batch + 1)
         # Validation
         model.eval()
         with torch.no_grad():
-            real, pred = model(train_mask, val_mask)
+            real, pred = model(is_val=True)
             val_loss = F.mse_loss(real[real != 0], pred[real != 0])
             results = results.append(
                 {'epoch': epoch,
                  'train_rmse': training_loss ** (1/2),
                  'val_rmse': val_loss.item() ** (1/2)},
                 ignore_index=True)
-            print(f"Epoch: {epoch}  --- train_mse={training_loss ** (1/2):.3f}, "
+            print(f"Epoch: {epoch}  --- train_rmse={training_loss ** (1/2):.3f}, "
                   f"val_rmse={val_loss.item() ** (1/2):.3f}, time={time.time() - t0:.2f}")
     return model, results
 
