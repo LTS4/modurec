@@ -91,7 +91,7 @@ def train_gae_net(recom_data, args):
         t0 = time.time()
         # Training
         model.train()
-        batch_size = 100
+        batch_size = recom_data.n_users
         batch_inds = np.random.permutation(list(range(recom_data.n_users)))
         for i in range(0, recom_data.n_users, batch_size):
             optimizer.zero_grad()
@@ -101,6 +101,7 @@ def train_gae_net(recom_data, args):
             train_loss = mse_loss + reg_loss
             train_loss.backward()
             optimizer.step()
+        batch_size = recom_data.n_items
         batch_inds = np.random.permutation(list(range(recom_data.n_items)))
         for i in range(0, recom_data.n_items, batch_size):
             optimizer.zero_grad()

@@ -47,6 +47,8 @@ class GAENet(torch.nn.Module):
         self.x_train = (self.x * self.train_mask)
         self.x_val = (self.x * self.val_mask)
 
+        self.mean_rating = self.x_train[self.x_train != 0].mean()
+
         self.args = args
     
     def forward(self, batch=None, train='user', is_val=False):
@@ -57,8 +59,8 @@ class GAENet(torch.nn.Module):
         if is_val:
             p_u = nn.Hardtanh(1, 5)(self.user_ae(x))
             p_v = nn.Hardtanh(1, 5)(self.item_ae(x.T).T)
-            p_u = input_unseen_uv(self.x_train, self.x_val, p_u)
-            p_v = input_unseen_uv(self.x_train, self.x_val, p_v)
+            p_u = input_unseen_uv(self.x_train, self.x_val, p_u, self.mean_rating)
+            p_v = input_unseen_uv(self.x_train, self.x_val, p_v, self.mean_rating)
             pred = (p_u + p_v) / 2
             return pred, p_u, p_v
         elif train == 'user':
