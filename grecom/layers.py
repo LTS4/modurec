@@ -3,7 +3,7 @@ import torch.sparse
 from torch.nn import Parameter
 from torch.nn.init import xavier_normal_, zeros_
 from torch_scatter import scatter_add
-from torch_geometric.nn import MessagePassing
+from torch_geometric.nn import MessagePassing, GraphConv
 import torch.nn.init as init
 import math
 import torch.nn as nn
@@ -79,6 +79,7 @@ class GraphAutoencoder(torch.nn.Module):
         super(GraphAutoencoder, self).__init__()
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
+        self.conv = GraphConv(emb_size, emb_size, bias=False)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
@@ -95,5 +96,6 @@ class GraphAutoencoder(torch.nn.Module):
 
     def forward(self, x):
         h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
+        h = self.conv(h)
         p = F.linear(h, self.wdec, self.bdec)
         return p
