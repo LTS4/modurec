@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from grecom.data_utils import input_unseen_uv
 from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
 from torch.nn import Parameter
 
@@ -49,14 +50,15 @@ class GAENet(torch.nn.Module):
         """
         mask = torch.tensor(mask).to(self.args.device)
         # Create input features
-        x_u = (self.x * mask)
-        x_v = x_u.t()
-        p_u = self.user_ae(x_u)
-        #p_v = p_u #self.item_ae(x_v)
+        x = (self.x * mask)
+        # p_u = self.user_ae(x)
+        p_v = self.item_ae(x.t()).T
         if val_mask is not None:
             val_mask = torch.tensor(val_mask).to(self.args.device)
-            val_u = (self.x * val_mask)
-            p_u = nn.Hardtanh(1, 5)(p_u)
-            # p_v = nn.Hardtanh(1, 5)(p_v)
-            return val_u, p_u
-        return x_u, p_u
+            val = (self.x * val_mask)
+            # p_u = nn.Hardtanh(1, 5)(p_u)
+            p_v = nn.Hardtanh(1, 5)(p_v)
+            [p_v] = input_unseen_uv(x, val, [p_v])
+            return val, p_v
+        return x, p_v
+
