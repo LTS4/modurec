@@ -82,10 +82,10 @@ def train_gae_net(recom_data, args):
     optimizer = optim.Rprop(model.parameters())
     results = pd.DataFrame()
     epoch_size = len(train_inds)
-    reg = 0.001
+    reg = 0.01
     val_mask = np.zeros_like(recom_data.rating_matrix)
     val_mask[tuple(val_inds.T)] = 1
-    for epoch in range(100000):
+    for epoch in range(1000):
         t0 = time.time()
         # Training
         model.train()
@@ -98,7 +98,7 @@ def train_gae_net(recom_data, args):
             train_mask[tuple(train_batch.T)] = 1
             real, pred = model(train_mask)
             train_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            train_loss += reg / 2 * (torch.norm(model.wenc) ** 2 + torch.norm(model.wdec) ** 2)
+            train_loss += reg / 2 * (torch.norm(model.user_ae.wenc) ** 2 + torch.norm(model.user_ae.wdec) ** 2)
             train_loss.backward()
             training_loss += train_loss
             optimizer.step()

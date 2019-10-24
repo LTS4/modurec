@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from grecom.layers import RecomConv, BilinearDecoder
-import torch.nn.init as init
+from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
 from torch.nn import Parameter
-import math
+
 
 
 class RecomNet(torch.nn.Module):
@@ -34,29 +33,16 @@ class GAENet(torch.nn.Module):
     """Graph Autoencoder Network
     """
 
-    def __init__(self, recom_data, args, emb_size=200):
+    def __init__(self, recom_data, args, emb_size=500):
         super(GAENet, self).__init__()
 
         self.x = torch.tensor(recom_data.rating_matrix).to(args.device)
 
         # Item autoencoder
-        self.wenc = Parameter(torch.Tensor(emb_size, recom_data.n_users).to(args.device))
-        self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
-        self.wdec = Parameter(torch.Tensor(recom_data.n_users, emb_size).to(args.device))
-        self.bdec = Parameter(torch.Tensor(recom_data.n_users).to(args.device))
+        self.item_ae = GraphAutoencoder(recom_data.n_users, args)
+        self.user_ae = GraphAutoencoder(recom_data.n_items, args)
 
-        self.weights_list = [self.wenc, self.wdec]
-        self.biases_list = [self.benc, self.bdec]
         self.args = args
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        for w, b in zip(self.weights_list, self.biases_list):
-            init.kaiming_uniform_(w, a=math.sqrt(5))
-            fan_in, _ = init._calculate_fan_in_and_fan_out(w)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(b, -bound, bound)
     
     def forward(self, mask=None, val_mask=None):
         """mask: size 2*E
@@ -65,12 +51,12 @@ class GAENet(torch.nn.Module):
         # Create input features
         x_u = (self.x * mask)
         x_v = x_u.t()
-        h_v = nn.Sigmoid()(F.linear(x_v, self.wenc, self.benc))
-        p_v = F.linear(h_v, self.wdec, self.bdec)
-        # p_v = nn.Hardtanh(1, 5)(p_v)
+        p_u = self.user_ae(x_u)
+        #p_v = p_u #self.item_ae(x_v)
         if val_mask is not None:
             val_mask = torch.tensor(val_mask).to(self.args.device)
             val_u = (self.x * val_mask)
-            val_v = val_u.t()
-            return val_v, p_v
-        return x_v, p_v
+            p_u = nn.Hardtanh(1, 5)(p_u)
+            # p_v = nn.Hardtanh(1, 5)(p_v)
+            return val_u, p_u
+        return x_u, p_u

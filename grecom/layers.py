@@ -4,6 +4,10 @@ from torch.nn import Parameter
 from torch.nn.init import xavier_normal_, zeros_
 from torch_scatter import scatter_add
 from torch_geometric.nn import MessagePassing
+import torch.nn.init as init
+import math
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 class RecomConv(MessagePassing):
@@ -70,35 +74,26 @@ class BilinearDecoder(torch.nn.Module):
         return torch.sum((h1 @ self.Q) * h2, dim=1) + self.bias
 
 
-class RatingConv(MessagePassing):
-    def __init__(self, args):
-        super(RatingConv, self).__init__(aggr='add')  # "Add" aggregation.
-        self.args = args
-
-    def forward(self, edge_rat, ratings, x):
-        # x : [N, U or V]
-        rat_mat = torch.sparse.LongTensor(
-            torch.LongTensor(edge_rat),
-            torch.FloatTensor(ratings),
-            torch.Size([x.size(0), x.size(0)])
-        )
-        x = self.propagate(
-            x=torch.sparse.mm(rat_mat, x),
-            edge_index=edge_rat)
-        return x
-
-    def message(self, x_j, edge_index):
-        # x_j has shape [E, out_channels]
-        return x_j
-
-    def update(self, aggr_out):
-        # aggr_out has shape [N, out_channels]
-        return aggr_out
-
-    def __repr__(self):
-        return '{}'.format(self.__class__.__name__)
-
-
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, edge_sim, edge_rat, x, ratings, args):
-        pass
+    def __init__(self, input_size, args, emb_size=500):
+        super(GraphAutoencoder, self).__init__()
+        self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
+        self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
+        self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
+        self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
+
+        self.weights_list = [self.wenc, self.wdec]
+        self.biases_list = [self.benc, self.bdec]
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        for w, b in zip(self.weights_list, self.biases_list):
+            init.kaiming_uniform_(w, a=math.sqrt(5))
+            fan_in, _ = init._calculate_fan_in_and_fan_out(w)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(b, -bound, bound)
+
+    def forward(self, x):
+        h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
+        p = F.linear(h, self.wdec, self.bdec)
+        return p
