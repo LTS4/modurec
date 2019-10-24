@@ -84,16 +84,17 @@ def train_gae_net(recom_data, args):
     val_mask = np.zeros_like(recom_data.rating_matrix)
     val_mask[tuple(val_inds.T)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
-    optimizer = optim.Rprop(model.parameters())
+    optimizer = optim.Adam(model.parameters(), 1e-3)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     reg = 0.001
-    for epoch in range(1000):
+    for epoch in range(10000):
         t0 = time.time()
         # Training
         model.train()
-        batch_size = 100
+        batch_size = recom_data.n_items
         training_loss = 0
-        item_inds = list(range(recom_data.n_items))
+        item_inds = np.random.permutation(list(range(recom_data.n_items)))
         for n_batch, i in enumerate(range(0, recom_data.n_items, batch_size)):
             t1 = time.time()
             optimizer.zero_grad()
@@ -121,6 +122,7 @@ def train_gae_net(recom_data, args):
                 ignore_index=True)
             print(f"Epoch: {epoch}  --- train_rmse={training_loss ** (1/2):.3f}, "
                   f"val_rmse={val_loss.item() ** (1/2):.3f}, time={time.time() - t0:.2f}")
+        scheduler.step()
     return model, results
 
 
