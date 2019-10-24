@@ -84,43 +84,53 @@ def train_gae_net(recom_data, args):
     val_mask = np.zeros_like(recom_data.rating_matrix)
     val_mask[tuple(val_inds.T)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
-    optimizer = optim.Rprop(model.parameters())
+    optimizer = optim.Adam(model.parameters(), args.lr)
     results = pd.DataFrame()
-    reg = 0.001
     for epoch in range(1000):
         t0 = time.time()
         # Training
         model.train()
         batch_size = 100
-        training_loss = 0
-        item_inds = list(range(recom_data.n_items))
-        for n_batch, i in enumerate(range(0, recom_data.n_items, batch_size)):
-            t1 = time.time()
+        batch_inds = np.random.permutation(list(range(recom_data.n_users)))
+        for i in range(0, recom_data.n_users, batch_size):
             optimizer.zero_grad()
-            item_batch = item_inds[i:i + batch_size]
-            real, pred = model(item_batch)
+            batch = batch_inds[i:i + batch_size]
+            real, pred, reg_loss = model(batch, train='user')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            reg_loss = reg / 2 * (torch.norm(model.item_ae.wenc) ** 2 + torch.norm(model.item_ae.wdec) ** 2)
             train_loss = mse_loss + reg_loss
             train_loss.backward()
-            training_loss += mse_loss
             optimizer.step()
-            if verbose:
-                print(f"Batch: {n_batch}  --- batch_rmse={mse_loss ** (1 / 2):.3f}, "
-                      f"time={time.time() - t1:.2f}")
-        training_loss /= (n_batch + 1)
+        batch_inds = np.random.permutation(list(range(recom_data.n_items)))
+        for i in range(0, recom_data.n_items, batch_size):
+            optimizer.zero_grad()
+            batch = batch_inds[i:i + batch_size]
+            real, pred, reg_loss = model(batch, train='item')
+            mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+            train_loss = mse_loss + reg_loss
+            train_loss.backward()
+            optimizer.step()
         # Validation
         model.eval()
         with torch.no_grad():
-            real, pred = model(is_val=True)
-            val_loss = F.mse_loss(real[real != 0], pred[real != 0])
+            real_train, real_val = model.x_train, model.x_val
+            pred, p_u, p_v = model(is_val=True)
+            train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0])
+            val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0])
             results = results.append(
                 {'epoch': epoch,
-                 'train_rmse': training_loss ** (1/2),
+                 'train_rmse': train_loss.item() ** (1/2),
                  'val_rmse': val_loss.item() ** (1/2)},
                 ignore_index=True)
-            print(f"Epoch: {epoch}  --- train_rmse={training_loss ** (1/2):.3f}, "
+            print(f"(u+v) Epoch: {epoch}  --- train_rmse={train_loss.item() ** (1/2):.3f}, "
                   f"val_rmse={val_loss.item() ** (1/2):.3f}, time={time.time() - t0:.2f}")
+            train_loss = F.mse_loss(real_train[real_train != 0], p_u[real_train != 0])
+            val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0])
+            print(f"( u ) Epoch: {epoch}  --- train_rmse={train_loss.item() ** (1 / 2):.3f}, "
+                  f"val_rmse={val_loss.item() ** (1 / 2):.3f}")
+            train_loss = F.mse_loss(real_train[real_train != 0], p_v[real_train != 0])
+            val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0])
+            print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss.item() ** (1 / 2):.3f}, "
+                  f"val_rmse={val_loss.item() ** (1 / 2):.3f}")
     return model, results
 
 

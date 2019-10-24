@@ -33,6 +33,8 @@ def parser_recommender():
                         choices=['movielens100k'])
     parser.add_argument('--model', type=str, help='model',
                         choices=['hetero_gcmc', 'gautorec'])
+    parser.add_argument('--reg', type=float, default=0.001,
+                        help='regularization parameter')
     common_parser(parser)
     # Parse the arguments
     args = parser.parse_args()

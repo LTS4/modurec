@@ -49,19 +49,30 @@ class GAENet(torch.nn.Module):
 
         self.args = args
     
-    def forward(self, item_batch=None, is_val=False):
+    def forward(self, batch=None, train='user', is_val=False):
         """mask: size 2*E
         """
         # Create input features
         x = self.x_train
-        if item_batch is not None:
-            x = x[:, item_batch]
-        # p_u = self.user_ae(x)
-        p_v = self.item_ae(x.T).T
         if is_val:
-            # p_u = nn.Hardtanh(1, 5)(p_u)
-            p_v = nn.Hardtanh(1, 5)(p_v)
+            p_u = nn.Hardtanh(1, 5)(self.user_ae(x))
+            p_v = nn.Hardtanh(1, 5)(self.item_ae(x.T).T)
+            p_u = input_unseen_uv(self.x_train, self.x_val, p_u)
             p_v = input_unseen_uv(self.x_train, self.x_val, p_v)
-            return self.x_val, p_v
+            pred = (p_u + p_v) / 2
+            return pred, p_u, p_v
+        elif train == 'user':
+            if batch is not None:
+                x = x[batch, :]
+            reg_loss = self.args.reg / 2 * (torch.norm(self.user_ae.wenc) ** 2 + torch.norm(self.user_ae.wdec) ** 2)
+            return x, self.user_ae(x), reg_loss
+        elif train == 'item':
+            if batch is not None:
+                x = x[:, batch]
+            reg_loss = self.args.reg / 2 * (torch.norm(self.item_ae.wenc) ** 2 + torch.norm(self.item_ae.wdec) ** 2)
+            return x, self.item_ae(x.T).T, reg_loss
+        else:
+            raise ValueError
+
         return x, p_v
 
