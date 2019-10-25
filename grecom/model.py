@@ -68,12 +68,20 @@ class GAENet(torch.nn.Module):
         elif train == 'user':
             if batch is not None:
                 x = x[batch, :]
-            reg_loss = self.args.reg / 2 * (torch.norm(self.user_ae.wenc) ** 2 + torch.norm(self.user_ae.wdec) ** 2)
+            reg_loss = self.args.reg / 3 * (
+                torch.norm(self.user_ae.wenc) ** 2 + 
+                torch.norm(self.user_ae.wdec) ** 2 + 
+                torch.norm(self.user_ae.conv.weight) ** 2
+            )
             return x, self.user_ae(x, self.edge_index_u), reg_loss
         elif train == 'item':
             if batch is not None:
                 x = x[:, batch]
-            reg_loss = self.args.reg / 2 * (torch.norm(self.item_ae.wenc) ** 2 + torch.norm(self.item_ae.wdec) ** 2)
+            reg_loss = self.args.reg / 3 * (
+                torch.norm(self.item_ae.wenc) ** 2 + 
+                torch.norm(self.item_ae.wdec) ** 2 + 
+                torch.norm(self.item_ae.conv.weight) ** 2
+            )
             return x, self.item_ae(x.T, self.edge_index_v).T, reg_loss
         else:
             raise ValueError

@@ -93,6 +93,8 @@ class GraphAutoencoder(torch.nn.Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(w)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
+        init.eye_(self.conv.lin.weight)
+        init.zeros_(self.conv.weight)
 
     def forward(self, x, edge_index):
         h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
