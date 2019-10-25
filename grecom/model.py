@@ -4,8 +4,6 @@ import torch.nn.functional as F
 
 from grecom.data_utils import input_unseen_uv
 from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
-from torch.nn import Parameter
-
 
 
 class RecomNet(torch.nn.Module):

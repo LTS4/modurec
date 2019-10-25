@@ -79,7 +79,9 @@ class GraphAutoencoder(torch.nn.Module):
         super(GraphAutoencoder, self).__init__()
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
+        self.bn0 = nn.BatchNorm1d(emb_size).to(args.device)
         self.conv = GraphConv(emb_size, emb_size, bias=False).to(args.device)
+        self.bn1 = nn.BatchNorm1d(emb_size).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
@@ -98,6 +100,6 @@ class GraphAutoencoder(torch.nn.Module):
 
     def forward(self, x, edge_index):
         h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
-        h = self.conv(h, edge_index)
+        h = self.bn1(self.conv(self.bn0(h), edge_index))
         p = F.linear(h, self.wdec, self.bdec)
         return p
