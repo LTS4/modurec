@@ -79,14 +79,13 @@ class GraphAutoencoder(torch.nn.Module):
         super(GraphAutoencoder, self).__init__()
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
-        self.bn0 = nn.BatchNorm1d(emb_size).to(args.device)
         self.conv = GraphConv(emb_size, emb_size, bias=False).to(args.device)
-        self.bn1 = nn.BatchNorm1d(emb_size).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
         self.weights_list = [self.wenc, self.wdec]
         self.biases_list = [self.benc, self.bdec]
+        self.emb_size = emb_size
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -95,11 +94,12 @@ class GraphAutoencoder(torch.nn.Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(w)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
-        init.eye_(self.conv.lin.weight)
-        init.zeros_(self.conv.weight)
+        init.normal_(self.conv.lin.weight, mean=0, std=0.1)
+        init.normal_(self.conv.weight, mean=0, std=0.1)
+        self.conv.lin.weight.data += torch.eye(self.emb_size, requires_grad=False)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index, edge_weight=None):
         h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
-        h = self.bn1(self.conv(self.bn0(h), edge_index))
+        h = self.conv(h, edge_index, edge_weight)
         p = F.linear(h, self.wdec, self.bdec)
         return p

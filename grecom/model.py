@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn import Parameter
 
 from grecom.data_utils import input_unseen_uv
 from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
@@ -48,6 +49,8 @@ class GAENet(torch.nn.Module):
 
         self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
         self.edge_index_v = recom_data.item_graph.edge_index.to(args.device) - recom_data.n_users
+        self.edge_weight_u = recom_data.user_graph.edge_weight.to(args.device)
+        self.edge_weight_v = recom_data.item_graph.edge_weight.to(args.device)
 
         self.args = args
     
@@ -71,7 +74,8 @@ class GAENet(torch.nn.Module):
                 torch.norm(self.user_ae.wdec) ** 2 + 
                 torch.norm(self.user_ae.conv.weight) ** 2
             )
-            return x, self.user_ae(x, self.edge_index_u), reg_loss
+            pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
+            return x, pred, reg_loss
         elif train == 'item':
             if batch is not None:
                 x = x[:, batch]
@@ -80,7 +84,8 @@ class GAENet(torch.nn.Module):
                 torch.norm(self.item_ae.wdec) ** 2 + 
                 torch.norm(self.item_ae.conv.weight) ** 2
             )
-            return x, self.item_ae(x.T, self.edge_index_v).T, reg_loss
+            pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
+            return x, pred, reg_loss
         else:
             raise ValueError
 
