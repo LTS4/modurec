@@ -74,58 +74,21 @@ class BilinearDecoder(torch.nn.Module):
         return torch.sum((h1 @ self.Q) * h2, dim=1) + self.bias
 
 
-class GraphConv_0D(MessagePassing):
-    def __init__(self, in_channels, out_channels, args):
-        super(RecomConv, self).__init__(aggr='add')  # "Add" aggregation.
-        self.weight_sim = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
-        self.weight_rat = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
-        self.weight_self = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
+class GraphConv0D(MessagePassing):
+    def __init__(self, args):
+        super(GraphConv0D, self).__init__(aggr='add')  # "Add" aggregation.
+        self.weight = Parameter(torch.FloatTensor(1).to(args.device))
 
-        self.bias = zeros_(Parameter(torch.Tensor(out_channels).to(args.device)))
+    def forward(self, x, edge_index, edge_weight=None, size=None):
+        h = x * self.weight
+        return self.propagate(edge_index, size=size, x=x, h=h,
+                              edge_weight=edge_weight)
 
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.args = args
+    def message(self, h_j, edge_weight):
+        return h_j if edge_weight is None else edge_weight.view(-1, 1) * h_j
 
-    @staticmethod
-    def norm(edge_index, num_nodes, edge_weight=None, dtype=None, symmetric=True):
-        if edge_weight is None:
-            edge_weight = torch.ones((edge_index.size(1),), dtype=dtype,
-                                     device=edge_index.device)
-
-        row, col = edge_index
-        deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
-        deg_inv_sqrt = deg.pow(-0.5)
-        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-        left_deg = deg_inv_sqrt[row] * edge_weight
-        if symmetric:
-            return left_deg * deg_inv_sqrt[col]  # symmetric norm
-        return left_deg
-
-    def forward(self, edge_sim, edge_rat, x):
-        # TODO: improve performance by avoiding recalculation of normalizations
-        x_self = torch.matmul(x, self.weight_self)
-        x_sim = self.propagate(
-            x=torch.matmul(x, self.weight_sim),
-            edge_index=edge_sim,
-            norm=self.norm(edge_sim, x.size(0), None, x.dtype))
-        x_rat = self.propagate(
-            x=torch.matmul(x, self.weight_rat),
-            edge_index=edge_rat,
-            norm=self.norm(edge_rat, x.size(0), None, x.dtype))
-        return x_self + x_sim + x_rat + self.bias
-
-    def message(self, x_j, edge_index, norm):
-        # x_j has shape [E, out_channels]
-        return norm.view(-1, 1) * x_j
-
-    def update(self, aggr_out):
-        # aggr_out has shape [N, out_channels]
-        return aggr_out
-
-    def __repr__(self):
-        return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,
-                                   self.out_channels)
+    def update(self, aggr_out, x):
+        return aggr_out + x
 
 
 class GraphAutoencoder(torch.nn.Module):
@@ -133,7 +96,7 @@ class GraphAutoencoder(torch.nn.Module):
         super(GraphAutoencoder, self).__init__()
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
-        self.conv = GraphConv(emb_size, emb_size, bias=False).to(args.device)
+        self.conv = GraphConv0D().to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
@@ -155,7 +118,7 @@ class GraphAutoencoder(torch.nn.Module):
 
     def forward(self, x, edge_index, edge_weight=None):
         h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
-        # h = self.conv(h, edge_index, edge_weight)
+        h = self.conv(h, edge_index, edge_weight)
         p = F.linear(h, self.wdec, self.bdec)
         return p, h
 
