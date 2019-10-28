@@ -91,6 +91,23 @@ class GraphConv0D(MessagePassing):
         return aggr_out + x
 
 
+class GraphConv1D(MessagePassing):
+    def __init__(self, emb_size, args):
+        super(GraphConv0D, self).__init__(aggr='add')  # "Add" aggregation.
+        self.weight = Parameter(torch.FloatTensor(emb_size).to(args.device))
+
+    def forward(self, x, edge_index, edge_weight=None, size=None):
+        h = torch.matmul(x, torch.diag(self.weight))
+        return self.propagate(edge_index, size=size, x=x, h=h,
+                              edge_weight=edge_weight)
+
+    def message(self, h_j, edge_weight):
+        return h_j if edge_weight is None else edge_weight.view(-1, 1) * h_j
+
+    def update(self, aggr_out, x):
+        return aggr_out + x
+
+
 class GraphAutoencoder(torch.nn.Module):
     def __init__(self, input_size, args, emb_size=500):
         super(GraphAutoencoder, self).__init__()
