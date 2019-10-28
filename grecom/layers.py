@@ -96,7 +96,7 @@ class GraphAutoencoder(torch.nn.Module):
         super(GraphAutoencoder, self).__init__()
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
-        self.conv = GraphConv0D().to(args.device)
+        self.conv = GraphConv0D(args).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
@@ -112,19 +112,17 @@ class GraphAutoencoder(torch.nn.Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(w)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
-        init.normal_(self.conv.lin.weight, mean=0, std=0.1)
-        init.normal_(self.conv.weight, mean=0, std=0.1)
-        self.conv.lin.weight.data += torch.eye(self.emb_size, requires_grad=False, device=self.args.device)
+        init.zeros_(self.conv.weight)
 
     def forward(self, x, edge_index, edge_weight=None):
         h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
         h = self.conv(h, edge_index, edge_weight)
         p = F.linear(h, self.wdec, self.bdec)
-        return p, h
+        return p
 
     def get_reg_loss(self):
         return self.args.reg / 2 * (
-            torch.norm(self.user_ae.wenc) ** 2 +
-            torch.norm(self.user_ae.wdec) ** 2
+            torch.norm(self.wenc) ** 2 +
+            torch.norm(self.wdec) ** 2
         )
 

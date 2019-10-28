@@ -4,6 +4,8 @@ import argparse
 def common_parser(parser):
     parser.add_argument('--experiments', type=int, default=1,
                         help='Number of experiments to average results on')
+    parser.add_argument('--testing', action='store_true', default=False,
+                        help='trains with train + val')
     # Learning parameters
     parser.add_argument('--lr', type=float, default=0.001,
                         help='learning rate (default: 0.001)')

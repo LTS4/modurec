@@ -78,6 +78,9 @@ def train_gae_net(recom_data, args):
     non_zero = np.where(recom_data.rating_matrix != 0)
     train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2, random_state=1)
     val_inds, test_inds = train_test_split(val_inds, test_size=0.5, random_state=1)
+    if args.testing:
+        train_inds = np.concatenate([train_inds, val_inds])
+        val_inds = test_inds.copy()
 
     train_mask = np.zeros_like(recom_data.rating_matrix)
     train_mask[tuple(train_inds.T)] = 1
