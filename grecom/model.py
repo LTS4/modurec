@@ -60,31 +60,25 @@ class GAENet(torch.nn.Module):
         # Create input features
         x = self.x_train
         if is_val:
-            p_u = nn.Hardtanh(1, 5)(self.user_ae(x, self.edge_index_u))
-            p_v = nn.Hardtanh(1, 5)(self.item_ae(x.T, self.edge_index_v).T)
+            p_u, h_u = self.user_ae(x, self.edge_index_u)
+            p_v, h_v = self.item_ae(x.T, self.edge_index_v)
+            p_u = nn.Hardtanh(1, 5)(p_u)
+            p_v = nn.Hardtanh(1, 5)(p_v.T)
             p_u = input_unseen_uv(self.x_train, self.x_val, p_u, self.mean_rating)
             p_v = input_unseen_uv(self.x_train, self.x_val, p_v, self.mean_rating)
             pred = (p_u + p_v) / 2
-            return pred, p_u, p_v
+            return pred, p_u, p_v, h_u, h_v
         elif train == 'user':
             if batch is not None:
                 x = x[batch, :]
-            reg_loss = self.args.reg / 3 * (
-                torch.norm(self.user_ae.wenc) ** 2 + 
-                torch.norm(self.user_ae.wdec) ** 2 + 
-                torch.norm(self.user_ae.conv.weight) ** 2
-            )
             pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
+            reg_loss = self.user_ae.get_reg_loss()
             return x, pred, reg_loss
         elif train == 'item':
             if batch is not None:
                 x = x[:, batch]
-            reg_loss = self.args.reg / 3 * (
-                torch.norm(self.item_ae.wenc) ** 2 + 
-                torch.norm(self.item_ae.wdec) ** 2 + 
-                torch.norm(self.item_ae.conv.weight) ** 2
-            )
             pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
+            reg_loss = self.item_ae.get_reg_loss()
             return x, pred, reg_loss
         else:
             raise ValueError

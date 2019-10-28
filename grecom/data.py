@@ -62,8 +62,8 @@ class RecommenderDataset(object):
         os.unlink(path)
 
     def create_user_graph(self, k=10):
-        C = kneighbors_graph(np.stack(self.items.features.values), k, n_jobs=-1).toarray()
-        D = kneighbors_graph(np.stack(self.items.features.values), k, n_jobs=-1, mode='distance').toarray()
+        C = kneighbors_graph(np.stack(self.users.features.values), k, n_jobs=-1).toarray()
+        D = kneighbors_graph(np.stack(self.users.features.values), k, n_jobs=-1, mode='distance').toarray()
         sigma = 1 / 3 * D[C == 1].mean()
         A = coo_matrix(C * np.exp(-D ** 2 / (2 * sigma ** 2)))
         row = [self.users.rel_id[x] for x in A.row]

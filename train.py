@@ -84,7 +84,7 @@ def train_gae_net(recom_data, args):
     val_mask = np.zeros_like(recom_data.rating_matrix)
     val_mask[tuple(val_inds.T)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
-    optimizer = optim.Adam(model.parameters(), args.lr)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     for epoch in range(args.epochs):
