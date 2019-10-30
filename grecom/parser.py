@@ -32,7 +32,7 @@ def common_parser(parser):
 def parser_recommender():
     parser = argparse.ArgumentParser(description='PyTorch Recommender System')
     parser.add_argument('--dataset', type=str, help='dataset',
-                        choices=['movielens100k'])
+                        choices=['ml-100k', 'ml-1m'])
     parser.add_argument('--model', type=str, help='model',
                         choices=['hetero_gcmc', 'gautorec'])
     parser.add_argument('--reg', type=float, default=0.001,

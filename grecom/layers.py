@@ -3,7 +3,7 @@ import torch.sparse
 from torch.nn import Parameter
 from torch.nn.init import xavier_normal_, zeros_
 from torch_scatter import scatter_add
-from torch_geometric.nn import MessagePassing, GraphConv
+from torch_geometric.nn import MessagePassing
 import torch.nn.init as init
 import math
 import torch.nn as nn
@@ -143,3 +143,28 @@ class GraphAutoencoder(torch.nn.Module):
             torch.norm(self.wdec) ** 2
         )
 
+
+class TimeNN(torch.nn.Module):
+    def __init__(self, args, emb_size=32):
+        super(TimeNN, self).__init__()
+        self.w_dense1 = Parameter(torch.Tensor(emb_size, 3).to(args.device))
+        self.w_dense2 = Parameter(torch.Tensor(1, emb_size).to(args.device))
+
+        self.emb_size = emb_size
+        self.args = args
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        for w in [self.w_dense1, self.w_dense2]:
+            init.kaiming_uniform_(w, a=math.sqrt(5))
+
+    def forward(self, x):
+        h = F.relu(F.linear(x, self.w_dense1))
+        p = F.linear(h, self.w_dense2)
+        return torch.squeeze(p)
+
+    def get_reg_loss(self):
+        return self.args.reg / 2 * (
+            torch.norm(self.w_dense1) ** 2 +
+            torch.norm(self.w_dense2) ** 2
+        )

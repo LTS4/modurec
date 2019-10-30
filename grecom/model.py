@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import Parameter
 
 from grecom.data_utils import input_unseen_uv
-from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
+from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder, TimeNN
 
 
 class RecomNet(torch.nn.Module):
@@ -36,11 +35,13 @@ class GAENet(torch.nn.Module):
     def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
 
+        self.time_model = TimeNN(args)
         self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size)
         self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size)
 
         self.train_mask = torch.tensor(train_mask).to(args.device)
         self.val_mask = torch.tensor(val_mask).to(args.device)
+        self.time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
         self.x = torch.tensor(recom_data.rating_matrix).to(args.device)
         self.x_train = (self.x * self.train_mask)
         self.x_val = (self.x * self.val_mask)
@@ -58,7 +59,8 @@ class GAENet(torch.nn.Module):
         """mask: size 2*E
         """
         # Create input features
-        x = self.x_train
+        time_comp = self.time_model(self.time_matrix)
+        x = (self.x_train * time_comp)
         if is_val:
             p_u = self.user_ae(x, self.edge_index_u)
             p_v = self.item_ae(x.T, self.edge_index_v)
@@ -68,20 +70,18 @@ class GAENet(torch.nn.Module):
             p_v = input_unseen_uv(self.x_train, self.x_val, p_v, self.mean_rating)
             pred = (p_u + p_v) / 2
             return pred, p_u, p_v
-        elif train == 'user':
+        else:
             if batch is not None:
                 x = x[batch, :]
-            pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
-            reg_loss = self.user_ae.get_reg_loss()
+            if train == 'user':
+                pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
+                reg_loss = self.user_ae.get_reg_loss()
+            elif train == 'item':
+                pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
+                reg_loss = self.item_ae.get_reg_loss()
+            else:
+                raise ValueError
+            # reg_loss += self.time_model.get_reg_loss()
             return x, pred, reg_loss
-        elif train == 'item':
-            if batch is not None:
-                x = x[:, batch]
-            pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
-            reg_loss = self.item_ae.get_reg_loss()
-            return x, pred, reg_loss
-        else:
-            raise ValueError
-
         return x, p_v
 

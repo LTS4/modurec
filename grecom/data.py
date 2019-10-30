@@ -48,7 +48,7 @@ class RecommenderDataset(object):
         self.item_graph = self.create_item_graph()
         self.similar_graph = self.create_similar_graph()
 
-        self.rating_matrix = self.create_rating_matrix()
+        self.rating_matrix, self.time_matrix = self.create_rating_matrices()
 
     def select_url(self):
         return {
@@ -60,19 +60,6 @@ class RecommenderDataset(object):
         path = download_url(self.url, self.args.raw_path)
         extract_zip(path, self.args.raw_path)
         os.unlink(path)
-
-    def create_user_graph(self, k=10):
-        C = kneighbors_graph(np.stack(self.users.features.values), k, n_jobs=-1).toarray()
-        D = kneighbors_graph(np.stack(self.users.features.values), k, n_jobs=-1, mode='distance').toarray()
-        sigma = 1 / 3 * D[C == 1].mean()
-        A = coo_matrix(C * np.exp(-D ** 2 / (2 * sigma ** 2)))
-        row = [self.users.rel_id[x] for x in A.row]
-        col = [self.users.rel_id[x] for x in A.col]
-        return Data(edge_index=torch.tensor([row, col], dtype=torch.long),
-                    edge_weight=torch.tensor(A.data, dtype=torch.float),
-                    num_nodes=self.n_users,
-                    ids=self.users.user_id.values,
-                    x=torch.eye(self.n_users))
 
     def create_global_indices(self):
         user_ids = np.unique(np.concatenate(
@@ -90,6 +77,19 @@ class RecommenderDataset(object):
         self.users['rel_id'] = [self.dict_user_ar[x] for x in self.users.user_id]
         self.items['rel_id'] = [self.dict_item_ar[x] for x in self.items.item_id]
 
+    def create_user_graph(self, k=10):
+        C = kneighbors_graph(np.stack(self.users.features.values), k, n_jobs=-1).toarray()
+        D = kneighbors_graph(np.stack(self.users.features.values), k, n_jobs=-1, mode='distance').toarray()
+        sigma = 1 / 3 * D[C == 1].mean()
+        A = coo_matrix(C * np.exp(-D ** 2 / (2 * sigma ** 2)))
+        row = [self.users.rel_id[x] for x in A.row]
+        col = [self.users.rel_id[x] for x in A.col]
+        return Data(edge_index=torch.tensor([row, col], dtype=torch.long),
+                    edge_weight=torch.tensor(A.data, dtype=torch.float),
+                    num_nodes=self.n_users,
+                    ids=self.users.user_id.values,
+                    x=torch.eye(self.n_users))
+    
     def preprocess_user_features(self):
         """Reads the raw files and generates a feature vector for each user
 
@@ -106,11 +106,11 @@ class RecommenderDataset(object):
         ids = []
         with open(os.path.join(self.raw_dir, 'users.dat')) as f:
             for l in f:
-                id_, gender, age, occupation, zip_ = l.strip().split('::')
+                id_, gender, age, occupation, _ = l.strip().split('::')
                 features = np.zeros(23)
                 features[0] = 0 if gender == 'M' else 1
                 features[1] = (int(age) - 1) / 55
-                features[2 + int(occupation)] = 1 / np.sqrt(2)  # TODO: normalize for any similarity function
+                features[2 + int(occupation)] = 1 / np.sqrt(2)
                 user_fts.append(features)
                 ids.append(int(id_))
         return pd.DataFrame({'user_id': ids, 'features': user_fts})
@@ -260,10 +260,22 @@ class RecommenderDataset(object):
             df.item_id.isin([self.dict_item_ra[x.item()] for x in new_item_ids]) & df.user_id.isin(
                 [self.dict_user_ra[x.item()] for x in new_user_ids])]
 
-    def create_rating_matrix(self):
+    def create_rating_matrices(self):
         y = self.rating_graph.y
         assert len(y) % 2 == 0
         y = y[:len(y)//2]
         rating_index = np.array(self.rating_graph.edge_index)[:, :len(y)]
         rating_index[1, :] = rating_index[1, :] - self.n_users
-        return coo_matrix((y, rating_index), shape=(self.n_users, self.n_items)).toarray()
+        f_norm = lambda x: (x - x.min()) / (x.max() - x.min())
+        abs_t = self.ratings[['timestamp']].apply(f_norm)
+        user_t = self.ratings.groupby('user_id').timestamp.apply(f_norm)
+        item_t = self.ratings.groupby('item_id').timestamp.apply(f_norm)
+        m_shape = (self.n_users, self.n_items)
+        rating_matrix = coo_matrix((y, rating_index), shape=m_shape).toarray()
+        time_matrix = np.stack([
+            coo_matrix((abs_t, rating_index), shape=m_shape).toarray(),
+            coo_matrix((user_t, rating_index), shape=m_shape).toarray(),
+            coo_matrix((item_t, rating_index), shape=m_shape).toarray()])
+        time_matrix = np.transpose(time_matrix, (1, 2, 0))
+        return rating_matrix, time_matrix
+
