@@ -18,6 +18,9 @@ from sklearn.model_selection import train_test_split
 TOY = False
 verbose = False
 
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.enabled = True
+
 
 def train_recom_net(recom_data, args):
     n_ratings = len(recom_data.rating_graph.edge_index[0]) // 2

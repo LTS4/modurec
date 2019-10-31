@@ -147,8 +147,8 @@ class GraphAutoencoder(torch.nn.Module):
 class TimeNN(torch.nn.Module):
     def __init__(self, args, emb_size=32):
         super(TimeNN, self).__init__()
-        self.w_dense1 = Parameter(torch.Tensor(emb_size, 3).to(args.device))
-        self.w_dense2 = Parameter(torch.Tensor(1, emb_size).to(args.device))
+        self.w_dense1 = Parameter(torch.Tensor(3, emb_size).to(args.device))
+        self.w_dense2 = Parameter(torch.Tensor(emb_size).to(args.device))
 
         self.emb_size = emb_size
         self.args = args
@@ -156,12 +156,12 @@ class TimeNN(torch.nn.Module):
 
     def reset_parameters(self):
         for w in [self.w_dense1, self.w_dense2]:
-            init.kaiming_uniform_(w, a=math.sqrt(5))
+            init.normal_(w)
 
     def forward(self, x):
-        h = F.relu(F.linear(x, self.w_dense1))
-        p = F.linear(h, self.w_dense2)
-        return torch.squeeze(p)
+        x = F.relu(torch.matmul(x, self.w_dense1))
+        p = torch.matmul(x, self.w_dense2)
+        return p
 
     def get_reg_loss(self):
         return self.args.reg / 2 * (

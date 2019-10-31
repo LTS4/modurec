@@ -81,5 +81,4 @@ class GAENet(torch.nn.Module):
                 raise ValueError
             # reg_loss += self.time_model.get_reg_loss()
             return x, pred, reg_loss
-        return x, p_v
 
