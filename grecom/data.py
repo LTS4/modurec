@@ -14,21 +14,19 @@ import torch
 
 
 class RecommenderDataset(object):
-    def __init__(self, args, name):
+    def __init__(self, args):
         # Dataset
-        self.name = name
         self.n_items = None
         self.n_users = None
         self.dict_user_ar = None
         self.dict_item_ar = None
         self.dict_user_ra = None
         self.dict_item_ra = None
-        assert name in ['ml-100k', 'ml-1m']
 
         # Paths
         self.args = args
-        self.raw_dir = os.path.join(args.raw_path, self.name)
-        self.data_dir = os.path.join(args.data_path, self.name)
+        self.raw_dir = os.path.join(args.raw_path, args.dataset)
+        self.data_dir = os.path.join(args.data_path, args.dataset)
 
         # Download dataset if needed
         if not os.path.exists(self.raw_dir):
@@ -54,7 +52,7 @@ class RecommenderDataset(object):
         return {
             'ml-100k': 'http://files.grouplens.org/datasets/movielens/ml-100k.zip',
             'ml-1m': 'http://files.grouplens.org/datasets/movielens/ml-1m.zip'
-        }[self.name]
+        }[self.args.dataset]
 
     def download(self):
         path = download_url(self.url, self.args.raw_path)
@@ -96,10 +94,13 @@ class RecommenderDataset(object):
         :return: Numpy array of size (num_users, num_features)
         :rtype: np.array
         """
-        return {
-            'ml-100k': None,
-            'ml-1m': self.preprocess_user_features_ml1m()
-        }[self.name]
+        if self.args.dataset == 'ml-100k':
+            return self.preprocess_user_features_ml100k()
+        elif self.args.dataset == 'ml-1m':
+            return self.preprocess_user_features_ml1m()
+
+    def preprocess_user_features_ml100k(self):
+        raise NotImplementedError
 
     def preprocess_user_features_ml1m(self):
         user_fts = []
@@ -134,11 +135,14 @@ class RecommenderDataset(object):
         :return: Numpy array of size (num_items, num_features)
         :rtype: np.array
         """
-        return {
-            'ml-100k': None,
-            'ml-1m': self.preprocess_item_features_ml1m()
-        }[self.name]
+        if self.args.dataset == 'ml-100k':
+            return self.preprocess_item_features_ml100k()
+        elif self.args.dataset == 'ml-1m':
+            return self.preprocess_item_features_ml1m()
 
+    def preprocess_item_features_ml100k(self):
+        raise NotImplementedError
+    
     def preprocess_item_features_ml1m(self):
         # Need to execute first "import standfordnlp; stanfordnlp.download('en', force=True)"
         all_genres = ['Action', 'Adventure', 'Animation', "Children's", 'Comedy',

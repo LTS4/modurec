@@ -7,11 +7,11 @@ from grecom.data import RecommenderDataset
 
 
 def create_recom_data(args, is_toy=False):
-    path_data = os.path.join(args.data_path, 'recom_data.pkl')
+    path_data = os.path.join(args.data_path, f'recom_data_{args.dataset}.pkl')
     path_toy = os.path.join(args.data_path, 'toy_data.pkl')
     if (not is_toy) or (is_toy and not os.path.exists(path_toy)):
         if not os.path.exists(path_data):
-            recom_data = RecommenderDataset(args, 'ml-1m')
+            recom_data = RecommenderDataset(args)
             with open(path_data, 'wb') as f:
                 pickle.dump(recom_data, f)
         else:
