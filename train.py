@@ -94,26 +94,20 @@ def train_gae_net(recom_data, args):
         t0 = time.time()
         # Training
         model.train()
-        batch_size = recom_data.n_users
-        batch_inds = np.random.permutation(list(range(recom_data.n_users)))
-        for i in range(0, recom_data.n_users, batch_size):
-            optimizer.zero_grad()
-            batch = batch_inds[i:i + batch_size]
-            real, pred, reg_loss = model(batch, train='user')
-            mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            train_loss = mse_loss + reg_loss
-            train_loss.backward()
-            optimizer.step()
-        batch_size = recom_data.n_items
-        batch_inds = np.random.permutation(list(range(recom_data.n_items)))
-        for i in range(0, recom_data.n_items, batch_size):
-            optimizer.zero_grad()
-            batch = batch_inds[i:i + batch_size]
-            real, pred, reg_loss = model(batch, train='item')
-            mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            train_loss = mse_loss + reg_loss
-            train_loss.backward()
-            optimizer.step()
+        # User model
+        optimizer.zero_grad()
+        real, pred, reg_loss = model(train='user')
+        mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+        train_loss = mse_loss + reg_loss
+        train_loss.backward()
+        optimizer.step()
+        # Item model
+        optimizer.zero_grad()
+        real, pred, reg_loss = model(train='item')
+        mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+        train_loss = mse_loss + reg_loss
+        train_loss.backward()
+        optimizer.step()
         # Validation
         model.eval()
         with torch.no_grad():

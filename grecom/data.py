@@ -267,9 +267,9 @@ class RecommenderDataset(object):
         rating_index = np.array(self.rating_graph.edge_index)[:, :len(y)]
         rating_index[1, :] = rating_index[1, :] - self.n_users
         f_norm = lambda x: (x - x.min()) / (x.max() - x.min())
-        abs_t = self.ratings[['timestamp']].apply(f_norm)
-        user_t = self.ratings.groupby('user_id').timestamp.apply(f_norm)
-        item_t = self.ratings.groupby('item_id').timestamp.apply(f_norm)
+        abs_t = self.ratings[['timestamp']].apply(f_norm).timestamp.values
+        user_t = self.ratings.groupby('user_id').timestamp.apply(f_norm).values
+        item_t = self.ratings.groupby('item_id').timestamp.apply(f_norm).values
         m_shape = (self.n_users, self.n_items)
         rating_matrix = coo_matrix((y, rating_index), shape=m_shape).toarray()
         time_matrix = np.stack([

@@ -55,7 +55,7 @@ class GAENet(torch.nn.Module):
 
         self.args = args
     
-    def forward(self, batch=None, train='user', is_val=False):
+    def forward(self, train='user', is_val=False):
         """mask: size 2*E
         """
         # Create input features
@@ -71,8 +71,6 @@ class GAENet(torch.nn.Module):
             pred = (p_u + p_v) / 2
             return pred, p_u, p_v
         else:
-            if batch is not None:
-                x = x[batch, :]
             if train == 'user':
                 pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
                 reg_loss = self.user_ae.get_reg_loss()
