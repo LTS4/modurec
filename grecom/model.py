@@ -41,7 +41,7 @@ class GAENet(torch.nn.Module):
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)
-        self.time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
+        #self.time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
         x = torch.tensor(recom_data.rating_matrix).to(args.device)
         self.x_train = (x * train_mask)
         self.x_val = (x * val_mask)
@@ -59,8 +59,9 @@ class GAENet(torch.nn.Module):
         """mask: size 2*E
         """
         # Create input features
-        time_comp = self.time_model(self.time_matrix)
-        x = (self.x_train * time_comp)
+        #time_comp = self.time_model(self.time_matrix)
+        #x = (self.x_train + time_comp)
+        x = self.x_train.clone()
         if is_val:
             p_u = self.user_ae(x, self.edge_index_u)
             p_v = self.item_ae(x.T, self.edge_index_v)
@@ -79,6 +80,6 @@ class GAENet(torch.nn.Module):
                 reg_loss = self.item_ae.get_reg_loss()
             else:
                 raise ValueError
-            # reg_loss += self.time_model.get_reg_loss()
-            return x, pred, reg_loss
+            #reg_loss += self.time_model.get_reg_loss()
+            return self.x_train, pred, reg_loss
 
