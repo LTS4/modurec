@@ -35,7 +35,7 @@ class GAENet(torch.nn.Module):
     def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
 
-        self.time_model = TimeNN(args)
+        #self.time_model = TimeNN(args)
         self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size)
         self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size)
 

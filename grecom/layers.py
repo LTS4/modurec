@@ -117,6 +117,9 @@ class GraphAutoencoder(torch.nn.Module):
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
+        self.dropout = nn.Dropout(p=0.7)
+        self.dropout2 = nn.Dropout(p=0.5)
+
         self.weights_list = [self.wenc, self.wdec]
         self.biases_list = [self.benc, self.bdec]
         self.emb_size = emb_size
@@ -132,9 +135,12 @@ class GraphAutoencoder(torch.nn.Module):
         init.zeros_(self.conv.weight)
 
     def forward(self, x, edge_index, edge_weight=None):
-        h = nn.Sigmoid()(F.linear(x, self.wenc, self.benc))
-        h = self.conv(h, edge_index, edge_weight)
-        p = F.linear(h, self.wdec, self.bdec)
+        x = self.dropout(x)
+        x = F.linear(x, self.wenc, self.benc)
+        x = nn.Sigmoid()(x)
+        x = self.dropout2(x)
+        #x = self.conv(x, edge_index, edge_weight)
+        p = F.linear(x, self.wdec, self.bdec)
         return p
 
     def get_reg_loss(self):
