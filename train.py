@@ -133,6 +133,7 @@ def train_gae_net(recom_data, args):
             val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0])
             print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss.item() ** (1 / 2):.3f}, "
                   f"val_rmse={val_loss.item() ** (1 / 2):.3f}")
+            print(f"Conv weights (u|v): {model.user_ae.conv.weight.item():.6f} | {model.user_ae.conv.weight.item():.6f}")
         scheduler.step()
     return model, results
 

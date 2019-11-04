@@ -138,8 +138,8 @@ class GraphAutoencoder(torch.nn.Module):
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
+        x = self.conv(x, edge_index, edge_weight)
         x = self.dropout2(x)
-        #x = self.conv(x, edge_index, edge_weight)
         p = F.linear(x, self.wdec, self.bdec)
         return p
 
