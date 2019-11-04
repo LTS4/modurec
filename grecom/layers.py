@@ -162,7 +162,7 @@ class TimeNN(torch.nn.Module):
 
     def reset_parameters(self):
         for w in [self.w_dense]:
-            init.normal_(w)
+            init.normal_(w, std=0.1)
 
     def forward(self, x):
         p = torch.matmul(x, self.w_dense)

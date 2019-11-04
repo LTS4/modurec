@@ -93,6 +93,7 @@ def train_gae_net(recom_data, args):
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
+    min_val = {'u+v':np.inf, 'u':np.inf, 'v':np.inf}
     for epoch in range(args.epochs):
         t0 = time.time()
         # Training
@@ -116,24 +117,42 @@ def train_gae_net(recom_data, args):
         with torch.no_grad():
             real_train, real_val = model.x_train, model.x_val
             pred, p_u, p_v = model(is_val=True)
-            train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0])
-            val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0])
+            train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)
+            val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
+            if val_loss < min_val['u+v']:
+                print(f"(u+v) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
+                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
+                min_val['u+v'] = val_loss
             results = results.append(
                 {'epoch': epoch,
-                 'train_rmse': train_loss.item() ** (1/2),
-                 'val_rmse': val_loss.item() ** (1/2)},
+                 'train_rmse': train_loss,
+                 'val_rmse': val_loss,
+                 'model': 'u+v'},
                 ignore_index=True)
-            print(f"(u+v) Epoch: {epoch}  --- train_rmse={train_loss.item() ** (1/2):.3f}, "
-                  f"val_rmse={val_loss.item() ** (1/2):.3f}, time={time.time() - t0:.2f}")
             train_loss = F.mse_loss(real_train[real_train != 0], p_u[real_train != 0])
             val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0])
-            print(f"( u ) Epoch: {epoch}  --- train_rmse={train_loss.item() ** (1 / 2):.3f}, "
-                  f"val_rmse={val_loss.item() ** (1 / 2):.3f}")
+            if val_loss < min_val['u']:
+                print(f"( u ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
+                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
+                min_val['u'] = val_loss
+            results = results.append(
+                {'epoch': epoch,
+                 'train_rmse': train_loss,
+                 'val_rmse': val_loss,
+                 'model': 'u'},
+                ignore_index=True)
             train_loss = F.mse_loss(real_train[real_train != 0], p_v[real_train != 0])
             val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0])
-            print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss.item() ** (1 / 2):.3f}, "
-                  f"val_rmse={val_loss.item() ** (1 / 2):.3f}")
-            print(f"Conv weights (u|v): {torch.norm(model.user_ae.conv.weight):.6f} | {torch.norm(model.item_ae.conv.weight):.6f}")
+            if val_loss < min_val['v']:
+                print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
+                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
+                min_val['v'] = val_loss
+            results = results.append(
+                {'epoch': epoch,
+                 'train_rmse': train_loss,
+                 'val_rmse': val_loss,
+                 'model': 'v'},
+                ignore_index=True)
         scheduler.step()
     return model, results
 
