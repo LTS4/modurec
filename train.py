@@ -129,8 +129,8 @@ def train_gae_net(recom_data, args):
                  'val_rmse': val_loss,
                  'model': 'u+v'},
                 ignore_index=True)
-            train_loss = F.mse_loss(real_train[real_train != 0], p_u[real_train != 0])
-            val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0])
+            train_loss = F.mse_loss(real_train[real_train != 0], p_u[real_train != 0]).item() ** (1/2)
+            val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['u']:
                 print(f"( u ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
                     f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
@@ -141,8 +141,8 @@ def train_gae_net(recom_data, args):
                  'val_rmse': val_loss,
                  'model': 'u'},
                 ignore_index=True)
-            train_loss = F.mse_loss(real_train[real_train != 0], p_v[real_train != 0])
-            val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0])
+            train_loss = F.mse_loss(real_train[real_train != 0], p_v[real_train != 0]).item() ** (1/2)
+            val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['v']:
                 print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
                     f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
