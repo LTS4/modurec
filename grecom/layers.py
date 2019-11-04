@@ -10,6 +10,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def conv_norm(edge_index, num_nodes, edge_weight=None, dtype=None, symmetric=True):
+    if edge_weight is None:
+        edge_weight = torch.ones((edge_index.size(1),), dtype=dtype,
+                                    device=edge_index.device)
+
+    row, col = edge_index
+    deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
+    deg_inv_sqrt = deg.pow(-0.5)
+    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+    left_deg = deg_inv_sqrt[row] * edge_weight
+    if symmetric:
+        return left_deg * deg_inv_sqrt[col]  # symmetric norm
+    return left_deg
+
+
 class RecomConv(MessagePassing):
     def __init__(self, in_channels, out_channels, args):
         super(RecomConv, self).__init__(aggr='add')  # "Add" aggregation.
@@ -23,32 +38,17 @@ class RecomConv(MessagePassing):
         self.out_channels = out_channels
         self.args = args
 
-    @staticmethod
-    def norm(edge_index, num_nodes, edge_weight=None, dtype=None, symmetric=True):
-        if edge_weight is None:
-            edge_weight = torch.ones((edge_index.size(1),), dtype=dtype,
-                                     device=edge_index.device)
-
-        row, col = edge_index
-        deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
-        deg_inv_sqrt = deg.pow(-0.5)
-        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-        left_deg = deg_inv_sqrt[row] * edge_weight
-        if symmetric:
-            return left_deg * deg_inv_sqrt[col]  # symmetric norm
-        return left_deg
-
     def forward(self, edge_sim, edge_rat, x):
         # TODO: improve performance by avoiding recalculation of normalizations
         x_self = torch.matmul(x, self.weight_self)
         x_sim = self.propagate(
             x=torch.matmul(x, self.weight_sim),
             edge_index=edge_sim,
-            norm=self.norm(edge_sim, x.size(0), None, x.dtype))
+            norm=conv_norm(edge_sim, x.size(0), None, x.dtype))
         x_rat = self.propagate(
             x=torch.matmul(x, self.weight_rat),
             edge_index=edge_rat,
-            norm=self.norm(edge_rat, x.size(0), None, x.dtype))
+            norm=conv_norm(edge_rat, x.size(0), None, x.dtype))
         return x_self + x_sim + x_rat + self.bias
 
     def message(self, x_j, edge_index, norm):
@@ -82,10 +82,10 @@ class GraphConv0D(MessagePassing):
     def forward(self, x, edge_index, edge_weight=None, size=None):
         h = x * self.weight
         return self.propagate(edge_index, size=size, x=x, h=h,
-                              edge_weight=edge_weight)
+                              norm=conv_norm(edge_index, x.size(0), edge_weight, x.dtype))
 
-    def message(self, h_j, edge_weight):
-        return h_j if edge_weight is None else edge_weight.view(-1, 1) * h_j
+    def message(self, h_j, norm):
+        return norm.view(-1, 1) * h_j
 
     def update(self, aggr_out, x):
         return aggr_out + x
@@ -93,16 +93,16 @@ class GraphConv0D(MessagePassing):
 
 class GraphConv1D(MessagePassing):
     def __init__(self, emb_size, args):
-        super(GraphConv0D, self).__init__(aggr='add')  # "Add" aggregation.
+        super(GraphConv1D, self).__init__(aggr='add')  # "Add" aggregation.
         self.weight = Parameter(torch.FloatTensor(emb_size).to(args.device))
 
     def forward(self, x, edge_index, edge_weight=None, size=None):
         h = torch.matmul(x, torch.diag(self.weight))
         return self.propagate(edge_index, size=size, x=x, h=h,
-                              edge_weight=edge_weight)
+                              norm=conv_norm(edge_index, x.size(0), edge_weight, x.dtype))
 
-    def message(self, h_j, edge_weight):
-        return h_j if edge_weight is None else edge_weight.view(-1, 1) * h_j
+    def message(self, h_j, norm):
+        return norm.view(-1, 1) * h_j
 
     def update(self, aggr_out, x):
         return aggr_out + x
@@ -114,6 +114,7 @@ class GraphAutoencoder(torch.nn.Module):
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
         self.conv = GraphConv0D(args).to(args.device)
+        #self.conv = GraphConv1D(emb_size, args).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 

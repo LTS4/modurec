@@ -4,4 +4,4 @@ python train.py \
 --model gautorec \
 --reg 1e-4 --lr 1e-3 \
 --epochs 5000 \
-#--testing
+--testing
