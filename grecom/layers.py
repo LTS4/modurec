@@ -109,8 +109,14 @@ class GraphConv1D(MessagePassing):
 
 
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, input_size, args, emb_size=500):
+    def __init__(self, input_size, time_matrix, args, emb_size=500):
         super(GraphAutoencoder, self).__init__()
+
+        self.time_matrix = time_matrix
+        self.time_model = TimeNN(args)
+        self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))
+        self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
+
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
         self.conv = GraphConv0D(args).to(args.device)
@@ -136,6 +142,8 @@ class GraphAutoencoder(torch.nn.Module):
         init.zeros_(self.conv.weight)
 
     def forward(self, x, edge_index, edge_weight=None):
+        time_comp = self.time_model(self.time_matrix)
+        x = (x * self.time_mult * time_comp) + self.time_add * time_comp
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)

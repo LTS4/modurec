@@ -35,15 +35,13 @@ class GAENet(torch.nn.Module):
     def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
 
-        self.time_model = TimeNN(args)
-        self.time_mult = nn.Parameter(torch.FloatTensor(1).to(args.device))
-        self.time_add = nn.Parameter(torch.FloatTensor(1).to(args.device))
-        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size)
-        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size)
+        time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
+        self.item_ae = GraphAutoencoder(recom_data.n_users, time_matrix.transpose(0,1), args, emb_size)
+        self.user_ae = GraphAutoencoder(recom_data.n_items, time_matrix, args, emb_size)
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)
-        self.time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
+        
         x = torch.tensor(recom_data.rating_matrix).to(args.device)
         self.x_train = (x * train_mask)
         self.x_val = (x * val_mask)
@@ -61,9 +59,7 @@ class GAENet(torch.nn.Module):
         """mask: size 2*E
         """
         # Create input features
-        time_comp = self.time_model(self.time_matrix)
-        x = (self.x_train * self.time_mult * time_comp) + self.time_add * time_comp
-        #x = self.x_train.clone()
+        x = self.x_train
         if is_val:
             p_u = self.user_ae(x, self.edge_index_u)
             p_v = self.item_ae(x.T, self.edge_index_v)
@@ -77,11 +73,12 @@ class GAENet(torch.nn.Module):
             if train == 'user':
                 pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
                 reg_loss = self.user_ae.get_reg_loss()
+                reg_loss += self.user_ae.time_model.get_reg_loss()
             elif train == 'item':
                 pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
                 reg_loss = self.item_ae.get_reg_loss()
+                reg_loss += self.item_ae.time_model.get_reg_loss()
             else:
                 raise ValueError
-            reg_loss += self.time_model.get_reg_loss()
             return self.x_train, pred, reg_loss
 
