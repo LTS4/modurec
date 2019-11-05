@@ -36,8 +36,8 @@ class GAENet(torch.nn.Module):
         super(GAENet, self).__init__()
 
         time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
-        self.item_ae = GraphAutoencoder(recom_data.n_users, time_matrix.transpose(0,1), args, emb_size)
-        self.user_ae = GraphAutoencoder(recom_data.n_items, time_matrix, args, emb_size)
+        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size, time_matrix.transpose(0,1))
+        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size, time_matrix)
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)
@@ -73,11 +73,9 @@ class GAENet(torch.nn.Module):
             if train == 'user':
                 pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
                 reg_loss = self.user_ae.get_reg_loss()
-                reg_loss += self.user_ae.time_model.get_reg_loss()
             elif train == 'item':
                 pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
                 reg_loss = self.item_ae.get_reg_loss()
-                reg_loss += self.item_ae.time_model.get_reg_loss()
             else:
                 raise ValueError
             return self.x_train, pred, reg_loss

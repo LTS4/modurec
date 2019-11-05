@@ -109,13 +109,19 @@ class GraphConv1D(MessagePassing):
 
 
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, input_size, time_matrix, args, emb_size=500):
+    def __init__(self, input_size, args, emb_size=500, time_matrix=None, time1d=False):
         super(GraphAutoencoder, self).__init__()
 
         self.time_matrix = time_matrix
-        self.time_model = TimeNN(args)
-        self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))
-        self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
+        self.time1d = time1d
+        if time_matrix is not None:
+            self.time_model = TimeNN(args)
+            if time1d:
+                self.time_mult = Parameter(torch.FloatTensor(input_size).to(args.device))
+                self.time_add = Parameter(torch.FloatTensor(input_size).to(args.device))
+            else:
+                self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
+                self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))
 
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
@@ -139,11 +145,15 @@ class GraphAutoencoder(torch.nn.Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(w)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
-        init.zeros_(self.conv.weight)
+        init.normal_(self.conv.weight, std=.01)
+        if self.time_matrix is not None:
+            init.normal_(self.time_mult, std=1e-4)
+            init.normal_(self.time_add, std=1e-4)
 
     def forward(self, x, edge_index, edge_weight=None):
-        time_comp = self.time_model(self.time_matrix)
-        x = (x * self.time_mult * time_comp) + self.time_add * time_comp
+        if self.time_matrix is not None:
+            time_comp = self.time_model(self.time_matrix)
+            x = (x * self.time_mult * time_comp) + self.time_add * time_comp
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
@@ -153,10 +163,13 @@ class GraphAutoencoder(torch.nn.Module):
         return p
 
     def get_reg_loss(self):
-        return self.args.reg / 2 * (
+        reg_loss = self.args.reg / 2 * (
             torch.norm(self.wenc) ** 2 +
             torch.norm(self.wdec) ** 2
         )
+        if self.time_matrix is not None:
+            reg_loss += self.time_model.get_reg_loss()
+        return reg_loss
 
 
 class TimeNN(torch.nn.Module):
