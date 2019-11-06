@@ -36,8 +36,8 @@ class GAENet(torch.nn.Module):
         super(GAENet, self).__init__()
 
         time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
-        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size, time_matrix.transpose(0,1))
-        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size, time_matrix)
+        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size, time_matrix.transpose(0, 1), time_ndim=1)
+        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size, time_matrix, time_ndim=2)
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)

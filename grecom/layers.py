@@ -109,20 +109,24 @@ class GraphConv1D(MessagePassing):
 
 
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, input_size, args, emb_size=500, time_matrix=None, time1d=False):
+    def __init__(self, input_size, args, emb_size=500, time_matrix=None, time_ndim=0):
         super(GraphAutoencoder, self).__init__()
 
         self.time_matrix = time_matrix
-        self.time1d = time1d
+        self.time_mult = None
+        self.time_add = None
+        self.time_ndim = time_ndim
         if time_matrix is not None:
             self.time_model = TimeNN(args)
-            if time1d:
-                self.time_mult = Parameter(torch.FloatTensor(input_size).to(args.device))
-                self.time_add = Parameter(torch.FloatTensor(input_size).to(args.device))
-            else:
+            if time_ndim == 0:
                 self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
                 self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))
-
+            elif time_ndim == 1:
+                self.time_mult = Parameter(torch.FloatTensor(input_size).to(args.device))
+                self.time_add = Parameter(torch.FloatTensor(input_size).to(args.device))
+            elif time_ndim == 2:
+                self.time_mult = Parameter(torch.zeros_like(time_matrix[:,:,0]).to(args.device))
+                self.time_add = Parameter(torch.zeros_like(time_matrix[:,:,0]).to(args.device))
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
         self.conv = GraphConv0D(args).to(args.device)
@@ -146,14 +150,14 @@ class GraphAutoencoder(torch.nn.Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
         init.normal_(self.conv.weight, std=.01)
-        if self.time_matrix is not None:
+        if self.time_mult is not None:
             init.normal_(self.time_mult, std=1e-4)
             init.normal_(self.time_add, std=1e-4)
 
     def forward(self, x, edge_index, edge_weight=None):
         if self.time_matrix is not None:
             time_comp = self.time_model(self.time_matrix)
-            x = (x * self.time_mult * time_comp) + self.time_add * time_comp
+            x = (x * time_comp * self.time_mult) + time_comp * self.time_add
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
