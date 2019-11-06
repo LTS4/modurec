@@ -90,11 +90,25 @@ def train_gae_net(recom_data, args):
     val_mask = np.zeros_like(recom_data.rating_matrix)
     val_mask[tuple(val_inds.T)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), args.lr)
+    optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     min_val = {'u+v':np.inf, 'u':np.inf, 'v':np.inf}
+    model.user_ae.conv.requires_grad = False
+    model.item_ae.conv.requires_grad = False
+    model.user_ae.time_model.requires_grad = False
+    model.item_ae.time_model.requires_grad = False
+    t_assert = model.user_ae.time_model.w_dense
     for epoch in range(args.epochs):
+        if epoch >= 5000:
+            model.user_ae.wenc.requires_grad = False
+            model.item_ae.wenc.requires_grad = False
+            model.user_ae.wdec.requires_grad = False
+            model.item_ae.wdec.requires_grad = False
+            model.user_ae.conv.requires_grad = True
+            model.item_ae.conv.requires_grad = True
+            model.user_ae.time_model.requires_grad = True
+            model.item_ae.time_model.requires_grad = True
         t0 = time.time()
         # Training
         model.train()
@@ -154,6 +168,7 @@ def train_gae_net(recom_data, args):
                  'model': 'v'},
                 ignore_index=True)
         scheduler.step()
+    print(min_val)
     return model, results
 
 
