@@ -36,8 +36,8 @@ class GAENet(torch.nn.Module):
         super(GAENet, self).__init__()
 
         time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
-        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size, time_matrix.transpose(0, 1), time_ndim=1)
-        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size, time_matrix, time_ndim=2)
+        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size)
+        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size)
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)
@@ -50,8 +50,8 @@ class GAENet(torch.nn.Module):
 
         self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
         self.edge_index_v = recom_data.item_graph.edge_index.to(args.device) - recom_data.n_users
-        self.edge_weight_u = recom_data.user_graph.edge_weight.to(args.device)
-        self.edge_weight_v = recom_data.item_graph.edge_weight.to(args.device)
+        self.edge_weight_u = nn.Parameter(recom_data.user_graph.edge_weight.to(args.device))
+        self.edge_weight_v = nn.Parameter(recom_data.item_graph.edge_weight.to(args.device))
 
         self.args = args
     
@@ -59,6 +59,8 @@ class GAENet(torch.nn.Module):
         """mask: size 2*E
         """
         # Create input features
+        ew_u = nn.ReLU()(self.edge_weight_u)
+        ew_v = nn.ReLU()(self.edge_weight_v)
         x = self.x_train
         if is_val:
             p_u = self.user_ae(x, self.edge_index_u)
@@ -71,10 +73,10 @@ class GAENet(torch.nn.Module):
             return pred, p_u, p_v
         else:
             if train == 'user':
-                pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
+                pred = self.user_ae(x, self.edge_index_u, ew_u)
                 reg_loss = self.user_ae.get_reg_loss()
             elif train == 'item':
-                pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
+                pred = self.item_ae(x.T, self.edge_index_v, ew_v).T
                 reg_loss = self.item_ae.get_reg_loss()
             else:
                 raise ValueError

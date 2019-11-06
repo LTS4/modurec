@@ -153,6 +153,7 @@ def train_gae_net(recom_data, args):
                  'val_rmse': val_loss,
                  'model': 'v'},
                 ignore_index=True)
+            print('u_edge:',torch.norm(model.edge_weight_u).item(), '| v_edge:', torch.norm(model.edge_weight_v).item())
         scheduler.step()
     return model, results
 
