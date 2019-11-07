@@ -90,7 +90,7 @@ def train_gae_net(recom_data, args):
     val_mask = np.zeros_like(recom_data.rating_matrix)
     val_mask[tuple(val_inds.T)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), args.lr)
+    optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     min_val = {'u+v':np.inf, 'u':np.inf, 'v':np.inf}
@@ -133,7 +133,7 @@ def train_gae_net(recom_data, args):
             val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['u']:
                 print(f"( u ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
-                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
+                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}, conv_w={model.user_ae.conv.weight.item()}")
                 min_val['u'] = val_loss
             results = results.append(
                 {'epoch': epoch,
@@ -145,7 +145,7 @@ def train_gae_net(recom_data, args):
             val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['v']:
                 print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
-                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
+                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}, conv_w={model.item_ae.conv.weight.item()}")
                 min_val['v'] = val_loss
             results = results.append(
                 {'epoch': epoch,
@@ -155,6 +155,9 @@ def train_gae_net(recom_data, args):
                 ignore_index=True)
             print('u_edge:',torch.norm(model.edge_weight_u).item(), '| v_edge:', torch.norm(model.edge_weight_v).item())
         scheduler.step()
+    print(min_val)
+    print("U|", model.user_ae.time_model, "time_m|a|r:", model.user_ae.time_mult,'|', model.user_ae.time_add, '|', model.user_ae.rating_add)
+    print("V|", model.item_ae.time_model, "time_m|a|r:", model.item_ae.time_mult,'|', model.item_ae.time_add, '|', model.item_ae.rating_add)
     return model, results
 
 

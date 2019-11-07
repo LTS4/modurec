@@ -3,5 +3,5 @@ python train.py \
 --dataset ml-1m \
 --model gautorec \
 --reg 1e-4 --lr 1e-3 \
---epochs 5000 \
+--epochs 2500 \
 --testing

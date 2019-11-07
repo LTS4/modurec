@@ -116,6 +116,7 @@ class GraphAutoencoder(torch.nn.Module):
         self.time_mult = None
         self.time_add = None
         self.time_ndim = time_ndim
+        self.rating_add = Parameter(torch.FloatTensor(1).to(args.device))
         if time_matrix is not None:
             self.time_model = TimeNN(args)
             if time_ndim == 0:
@@ -150,6 +151,7 @@ class GraphAutoencoder(torch.nn.Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
         init.normal_(self.conv.weight, std=.01)
+        init.zeros_(self.rating_add)
         if self.time_mult is not None:
             init.normal_(self.time_mult, std=1e-4)
             init.normal_(self.time_add, std=1e-4)
@@ -157,7 +159,7 @@ class GraphAutoencoder(torch.nn.Module):
     def forward(self, x, edge_index, edge_weight=None):
         if self.time_matrix is not None:
             time_comp = self.time_model(self.time_matrix)
-            x = (x * time_comp * self.time_mult) + time_comp * self.time_add
+            x = (x * time_comp * self.time_mult) + time_comp * self.time_add + x * self.rating_add
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
@@ -179,21 +181,27 @@ class GraphAutoencoder(torch.nn.Module):
 class TimeNN(torch.nn.Module):
     def __init__(self, args, emb_size=32):
         super(TimeNN, self).__init__()
-        self.w_dense = Parameter(torch.Tensor(3).to(args.device))
+        self.w_aff = Parameter(torch.Tensor(3).to(args.device))
+        self.b_aff = Parameter(torch.Tensor(3).to(args.device))
+        self.w_comb = Parameter(torch.Tensor(3).to(args.device))
 
         self.emb_size = emb_size
         self.args = args
         self.reset_parameters()
 
     def reset_parameters(self):
-        for w in [self.w_dense]:
+        for w in [self.w_comb, self.w_aff, self.b_aff]:
             init.normal_(w, std=0.1)
 
     def forward(self, x):
-        p = torch.matmul(x, self.w_dense)
+        x = x * self.w_aff + self.b_aff
+        p = torch.matmul(x, self.w_comb)
         return p
 
     def get_reg_loss(self):
         return self.args.reg * (
-            torch.norm(self.w_dense) ** 2
+            torch.norm(self.w_comb) ** 2
         )
+    
+    def __repr__(self):
+        return f"w_aff: {self.w_aff}, b_aff:{self.b_aff}, w_comb:{self.w_comb}"
