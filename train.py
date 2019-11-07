@@ -94,21 +94,7 @@ def train_gae_net(recom_data, args):
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     min_val = {'u+v':np.inf, 'u':np.inf, 'v':np.inf}
-    model.user_ae.conv.requires_grad = False
-    model.item_ae.conv.requires_grad = False
-    model.user_ae.time_model.requires_grad = False
-    model.item_ae.time_model.requires_grad = False
-    t_assert = model.user_ae.time_model.w_dense
     for epoch in range(args.epochs):
-        if epoch >= 5000:
-            model.user_ae.wenc.requires_grad = False
-            model.item_ae.wenc.requires_grad = False
-            model.user_ae.wdec.requires_grad = False
-            model.item_ae.wdec.requires_grad = False
-            model.user_ae.conv.requires_grad = True
-            model.item_ae.conv.requires_grad = True
-            model.user_ae.time_model.requires_grad = True
-            model.item_ae.time_model.requires_grad = True
         t0 = time.time()
         # Training
         model.train()
@@ -147,7 +133,7 @@ def train_gae_net(recom_data, args):
             val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['u']:
                 print(f"( u ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
-                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
+                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}, conv_w={model.user_ae.conv.weight.item()}")
                 min_val['u'] = val_loss
             results = results.append(
                 {'epoch': epoch,
@@ -159,7 +145,7 @@ def train_gae_net(recom_data, args):
             val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['v']:
                 print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
-                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
+                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}, conv_w={model.item_ae.conv.weight.item()}")
                 min_val['v'] = val_loss
             results = results.append(
                 {'epoch': epoch,
@@ -169,6 +155,8 @@ def train_gae_net(recom_data, args):
                 ignore_index=True)
         scheduler.step()
     print(min_val)
+    print("U|", model.user_ae.time_model, "time_m|a|r:", model.user_ae.time_mult,'|', model.user_ae.time_add, '|', model.user_ae.rating_add)
+    print("V|", model.item_ae.time_model, "time_m|a|r:", model.item_ae.time_mult,'|', model.item_ae.time_add, '|', model.item_ae.rating_add)
     return model, results
 
 
