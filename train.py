@@ -153,11 +153,10 @@ def train_gae_net(recom_data, args):
                  'val_rmse': val_loss,
                  'model': 'v'},
                 ignore_index=True)
-            print('u_edge:',torch.norm(model.edge_weight_u).item(), '| v_edge:', torch.norm(model.edge_weight_v).item())
         scheduler.step()
     print(min_val)
-    print("U|", model.user_ae.time_model, "time_m|a|r:", model.user_ae.time_mult,'|', model.user_ae.time_add, '|', model.user_ae.rating_add)
-    print("V|", model.item_ae.time_model, "time_m|a|r:", model.item_ae.time_mult,'|', model.item_ae.time_add, '|', model.item_ae.rating_add)
+    print("U|", model.user_ae.time_model, "time_m|a|r:", model.user_ae.time_mult.item(),'|', model.user_ae.time_add.item(), '|', model.user_ae.rating_add.item())
+    print("V|", model.item_ae.time_model, "time_m|a|r:", model.item_ae.time_mult.item(),'|', model.item_ae.time_add.item(), '|', model.item_ae.rating_add.item())
     return model, results
 
 
