@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch import optim
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 
 from grecom.data_utils import create_recom_data
 from grecom.model import RecomNet, GAENet
@@ -20,6 +21,8 @@ verbose = False
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.enabled = True
+
+writer = SummaryWriter('runs')
 
 
 def train_recom_net(recom_data, args):

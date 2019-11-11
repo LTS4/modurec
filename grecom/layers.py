@@ -159,7 +159,7 @@ class GraphAutoencoder(torch.nn.Module):
     def forward(self, x, edge_index, edge_weight=None):
         if self.time_matrix is not None:
             time_comp = self.time_model(self.time_matrix)
-            x = (x * time_comp * self.time_mult) + time_comp * self.time_add + x * self.rating_add
+            x = (x * time_comp * self.time_mult) + time_comp * self.time_add * (x > 0) + x * self.rating_add
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
@@ -195,6 +195,7 @@ class TimeNN(torch.nn.Module):
 
     def forward(self, x):
         x = x * self.w_aff + self.b_aff
+        x = nn.ReLU()(x)
         p = torch.matmul(x, self.w_comb)
         return p
 
