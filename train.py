@@ -158,8 +158,8 @@ def train_gae_net(recom_data, args):
                 ignore_index=True)
         scheduler.step()
     print(min_val)
-    print("U|", model.user_ae.time_model, "time_m|a|r:", model.user_ae.time_mult.item(),'|', model.user_ae.time_add.item(), '|', model.user_ae.rating_add.item())
-    print("V|", model.item_ae.time_model, "time_m|a|r:", model.item_ae.time_mult.item(),'|', model.item_ae.time_add.item(), '|', model.item_ae.rating_add.item())
+    print("U|", model.user_ae.time_model, "time:", model.user_ae.film_time)
+    print("V|", model.item_ae.time_model, "time:", model.item_ae.film_time)
     return model, results
 
 

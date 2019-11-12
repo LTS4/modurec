@@ -121,11 +121,7 @@ class GraphAutoencoder(torch.nn.Module):
                 0: 1,
                 1: input_size
             }[time_ndim]
-            self.film_time = {
-                'mult': Parameter(torch.FloatTensor(film_size).to(args.device)),
-                'add': Parameter(torch.FloatTensor(film_size).to(args.device)),
-                'other': Parameter(torch.FloatTensor(1).to(args.device))
-            }
+            self.film_time = FiLMlayer(args, film_size)
             
         # FiLM features
         self.feature_matrix = feature_matrix
@@ -136,11 +132,7 @@ class GraphAutoencoder(torch.nn.Module):
                 0: 1,
                 1: emb_size
             }[feature_ndim]
-            self.film_fts = {
-                'mult': Parameter(torch.FloatTensor(film_size).to(args.device)),
-                'add': Parameter(torch.FloatTensor(film_size).to(args.device)),
-                'other': Parameter(torch.FloatTensor(1).to(args.device))
-            }
+            self.film_fts = FiLMlayer(args, film_size)
         
         # Autoencoder
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
@@ -166,27 +158,19 @@ class GraphAutoencoder(torch.nn.Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
         init.normal_(self.conv.weight, std=.01)
-        if self.time_matrix is not None:
-            init.zeros_(self.film_time['other'])
-            init.normal_(self.film_time['mult'], std=1e-4)
-            init.normal_(self.film_time['add'], std=1e-4)
-        if self.feature_matrix is not None:
-            init.zeros_(self.film_fts['other'])
-            init.normal_(self.film_fts['mult'], std=1e-4)
-            init.normal_(self.film_fts['add'], std=1e-4)
         
 
     def forward(self, x, edge_index, edge_weight=None):
         if self.time_matrix is not None:
             time_comp = self.time_model(self.time_matrix)
-            x = (x * time_comp * self.film_time['mult']) + time_comp * self.film_time['add'] * (x > 0) + x * self.film_time['other']
+            x = self.film_time(x, time_comp, mask_add=(x > 0))
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
         if self.feature_matrix is not None:
             fts_comp = self.feature_model(self.feature_matrix)
-            x = (x * fts_comp * self.film_fts['mult']) + fts_comp * self.film_fts['add'] + x * self.film_fts['other']
-        #x = self.conv(x, edge_index, edge_weight)
+            x = self.film_fts(x, fts_comp)
+        x = self.conv(x, edge_index, edge_weight)
         x = self.dropout2(x)
         p = F.linear(x, self.wdec, self.bdec)
         return p
@@ -252,3 +236,24 @@ class FeatureNN(torch.nn.Module):
         return self.args.reg * (
             torch.norm(self.wenc) ** 2
         )
+
+class FiLMlayer(torch.nn.Module):
+    def __init__(self, args, size):
+        super(FiLMlayer, self).__init__()
+        self.mult = Parameter(torch.FloatTensor(size).to(args.device))
+        self.add = Parameter(torch.FloatTensor(size).to(args.device))
+        self.other = Parameter(torch.FloatTensor(size).to(args.device))
+
+        self.args = args
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.zeros_(self.other)
+        init.normal_(self.mult, std=1e-4)
+        init.normal_(self.add, std=1e-4)
+
+    def forward(self, x, z, mask_add=1):
+        return (x * z * self.mult) + z * self.add * mask_add + x * self.other
+
+    def __repr__(self):
+        return f"m|a|o: {self.mult.item()}|{self.add.item()}|{self.other.item()}"
