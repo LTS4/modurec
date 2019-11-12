@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from grecom.data_utils import input_unseen_uv
-from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder, TimeNN
+from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
 
 
 class RecomNet(torch.nn.Module):
@@ -36,35 +36,41 @@ class GAENet(torch.nn.Module):
     def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
 
-        self.time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
-        self.features_u = torch.tensor(np.stack(recom_data.users.features.values), dtype=torch.float).to(args.device)
-        self.features_v = torch.tensor(np.stack(recom_data.items.features.values), dtype=torch.float).to(args.device)
+        self.time_matrix = torch.tensor(
+            recom_data.time_matrix, dtype=torch.float).to(args.device)
+        self.features_u = torch.tensor(
+            np.stack(recom_data.users.features.values), dtype=torch.float
+            ).to(args.device)
+        self.features_v = torch.tensor(
+            np.stack(recom_data.items.features.values), dtype=torch.float
+            ).to(args.device)
 
         self.item_ae = GraphAutoencoder(
-            recom_data.n_users, args, emb_size, 
+            recom_data.n_users, args, emb_size,
             time_matrix=self.time_matrix.transpose(0, 1),
             feature_matrix=self.features_v)
         self.user_ae = GraphAutoencoder(
-            recom_data.n_items, args, emb_size, 
+            recom_data.n_items, args, emb_size,
             time_matrix=self.time_matrix,
             feature_matrix=self.features_u)
 
-        train_mask = torch.tensor(train_mask).to(args.device)
-        val_mask = torch.tensor(val_mask).to(args.device)
-        
+        self.train_mask = torch.tensor(train_mask).to(args.device)
+        self.val_mask = torch.tensor(val_mask).to(args.device)
+
         x = torch.tensor(recom_data.rating_matrix).to(args.device)
-        self.x_train = (x * train_mask)
-        self.x_val = (x * val_mask)
+        self.x_train = (x * self.train_mask)
+        self.x_val = (x * self.val_mask)
 
         self.mean_rating = self.x_train[self.x_train != 0].mean()
 
         self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
-        self.edge_index_v = recom_data.item_graph.edge_index.to(args.device) - recom_data.n_users
+        self.edge_index_v = recom_data.item_graph.edge_index.to(
+            args.device) - recom_data.n_users
         self.edge_weight_u = recom_data.user_graph.edge_weight.to(args.device)
         self.edge_weight_v = recom_data.item_graph.edge_weight.to(args.device)
 
         self.args = args
-    
+
     def forward(self, train='user', is_val=False):
         """mask: size 2*E
         """
@@ -75,8 +81,10 @@ class GAENet(torch.nn.Module):
             p_v = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
             p_u = nn.Hardtanh(1, 5)(p_u)
             p_v = nn.Hardtanh(1, 5)(p_v)
-            p_u = input_unseen_uv(self.x_train, self.x_val, p_u, self.mean_rating)
-            p_v = input_unseen_uv(self.x_train, self.x_val, p_v, self.mean_rating)
+            p_u = input_unseen_uv(
+                self.x_train, self.x_val, p_u, self.mean_rating)
+            p_v = input_unseen_uv(
+                self.x_train, self.x_val, p_v, self.mean_rating)
             pred = (p_u + p_v) / 2
             return pred, p_u, p_v
         else:
