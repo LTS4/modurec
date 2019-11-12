@@ -246,7 +246,6 @@ class FeatureNN(torch.nn.Module):
         init.zeros_(self.benc)
 
     def forward(self, x):
-        print(x.shape, self.wenc.shape)
         return F.linear(x, self.wenc, self.benc)
 
     def get_reg_loss(self):
