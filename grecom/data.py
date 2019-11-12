@@ -1,3 +1,7 @@
+"""Movielens 1M preprocessing code from:
+https://github.com/dmlc/dgl/blob/master/examples/pytorch/recommendation/rec/datasets/movielens.py
+"""
+
 import os
 import re
 import string
@@ -100,7 +104,18 @@ class RecommenderDataset(object):
             return self.preprocess_user_features_ml1m()
 
     def preprocess_user_features_ml100k(self):
-        raise NotImplementedError
+        user_fts = []
+        ids = []
+        with open(os.path.join(self.raw_dir, 'u.user')) as f:
+            for l in f:
+                id_, age, gender, occupation, _ = l.strip().split('|')
+                features = np.zeros(23)
+                features[0] = 0 if gender == 'M' else 1
+                features[1] = (int(age) - 1) / 55
+                features[2 + int(occupation)] = 1 / np.sqrt(2)
+                user_fts.append(features)
+                ids.append(int(id_))
+        return pd.DataFrame({'user_id': ids, 'features': user_fts})
 
     def preprocess_user_features_ml1m(self):
         user_fts = []
@@ -141,6 +156,14 @@ class RecommenderDataset(object):
             return self.preprocess_item_features_ml1m()
 
     def preprocess_item_features_ml100k(self):
+        movie_headers = ['movie id', 'movie title', 'release date', 'video release date',
+                         'IMDb URL', 'unknown', 'Action', 'Adventure', 'Animation',
+                         'Childrens', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy',
+                         'Film-Noir', 'Horror', 'Musical', 'Mystery', 'Romance', 'Sci-Fi',
+                         'Thriller', 'War', 'Western']
+        movie_df = pd.read_csv(os.path.join(self.raw_dir, 'u.item'), sep=r'|', header=None,
+                               names=movie_headers, engine='python')
+
         raise NotImplementedError
     
     def preprocess_item_features_ml1m(self):
