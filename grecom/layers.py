@@ -204,6 +204,7 @@ class TimeNN(torch.nn.Module):
 
     def forward(self, x):
         x = x * self.w_aff + self.b_aff
+        x = nn.ReLU()(x)  # Allows deactivation of some time inputs
         p = torch.matmul(x, self.w_comb)
         return p
 
