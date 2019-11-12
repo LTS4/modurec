@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 from grecom.data_utils import input_unseen_uv
 from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder, TimeNN
@@ -36,8 +37,17 @@ class GAENet(torch.nn.Module):
         super(GAENet, self).__init__()
 
         self.time_matrix = torch.tensor(recom_data.time_matrix, dtype=torch.float).to(args.device)
-        self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size, self.time_matrix.transpose(0, 1), time_ndim=0)
-        self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size, self.time_matrix, time_ndim=0)
+        self.features_u = torch.tensor(np.stack(recom_data.users.features.values), dtype=torch.float).to(args.device)
+        self.features_v = torch.tensor(np.stack(recom_data.items.features.values), dtype=torch.float).to(args.device)
+
+        self.item_ae = GraphAutoencoder(
+            recom_data.n_users, args, emb_size, 
+            time_matrix=self.time_matrix.transpose(0, 1),
+            feature_matrix=self.features_v)
+        self.user_ae = GraphAutoencoder(
+            recom_data.n_items, args, emb_size, 
+            time_matrix=self.time_matrix, 
+            feature_matrix=self.features_u)
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)
@@ -53,6 +63,8 @@ class GAENet(torch.nn.Module):
         self.edge_weight_u = recom_data.user_graph.edge_weight.to(args.device)
         self.edge_weight_v = recom_data.item_graph.edge_weight.to(args.device)
 
+        
+        print(self.features_u.shape, self.features_v.shape)
         self.args = args
     
     def forward(self, train='user', is_val=False):
@@ -61,10 +73,10 @@ class GAENet(torch.nn.Module):
         # Create input features
         x = self.x_train
         if is_val:
-            p_u = self.user_ae(x, self.edge_index_u)
-            p_v = self.item_ae(x.T, self.edge_index_v)
+            p_u = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
+            p_v = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
             p_u = nn.Hardtanh(1, 5)(p_u)
-            p_v = nn.Hardtanh(1, 5)(p_v.T)
+            p_v = nn.Hardtanh(1, 5)(p_v)
             p_u = input_unseen_uv(self.x_train, self.x_val, p_u, self.mean_rating)
             p_v = input_unseen_uv(self.x_train, self.x_val, p_v, self.mean_rating)
             pred = (p_u + p_v) / 2
