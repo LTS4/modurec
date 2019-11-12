@@ -220,8 +220,11 @@ class TimeNN(torch.nn.Module):
 class FeatureNN(torch.nn.Module):
     def __init__(self, args, ft_size, emb_size=500):
         super(FeatureNN, self).__init__()
-        self.wenc = Parameter(torch.Tensor(emb_size, ft_size).to(args.device))
-        self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
+        self.scale = Parameter(torch.FloatTensor(ft_size).to(args.device))
+        self.wenc = Parameter(torch.FloatTensor(emb_size, ft_size).to(args.device))
+        self.benc = Parameter(torch.FloatTensor(emb_size).to(args.device))
+
+        self.dropout = nn.Dropout(0.7)
 
         self.args = args
         self.reset_parameters()
@@ -229,9 +232,14 @@ class FeatureNN(torch.nn.Module):
     def reset_parameters(self):
         init.xavier_normal_(self.wenc)
         init.zeros_(self.benc)
+        init.ones_(self.scale)
 
     def forward(self, x):
-        return F.linear(x, self.wenc, self.benc)
+        x = self.dropout(x)
+        x = x * self.scale
+        x = nn.ReLU()(x)
+        x = F.linear(x, self.wenc, self.benc)
+        return x
 
     def get_reg_loss(self):
         return self.args.reg * (

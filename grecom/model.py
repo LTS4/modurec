@@ -42,10 +42,12 @@ class GAENet(torch.nn.Module):
 
         self.item_ae = GraphAutoencoder(
             recom_data.n_users, args, emb_size, 
-            time_matrix=self.time_matrix.transpose(0, 1))
+            time_matrix=self.time_matrix.transpose(0, 1),
+            feature_matrix=self.features_v)
         self.user_ae = GraphAutoencoder(
             recom_data.n_items, args, emb_size, 
-            time_matrix=self.time_matrix)
+            time_matrix=self.time_matrix,
+            feature_matrix=self.features_u)
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)
