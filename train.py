@@ -96,7 +96,7 @@ def train_gae_net(recom_data, args):
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
-    min_val = {'u+v':np.inf, 'u':np.inf, 'v':np.inf}
+    min_val = {'u+v':[0,np.inf], 'u':[0,np.inf], 'v':[0,np.inf]}
     for epoch in range(args.epochs):
         t0 = time.time()
         # Training
@@ -122,10 +122,8 @@ def train_gae_net(recom_data, args):
             pred, p_u, p_v = model(is_val=True)
             train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)
             val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
-            if val_loss < min_val['u+v']:
-                print(f"(u+v) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
-                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}")
-                min_val['u+v'] = val_loss
+            if val_loss < min_val['u+v'][1]:
+                min_val['u+v'] = [epoch, val_loss]
             results = results.append(
                 {'epoch': epoch,
                  'train_rmse': train_loss,
@@ -134,10 +132,8 @@ def train_gae_net(recom_data, args):
                 ignore_index=True)
             train_loss = F.mse_loss(real_train[real_train != 0], p_u[real_train != 0]).item() ** (1/2)
             val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0]).item() ** (1/2)
-            if val_loss < min_val['u']:
-                print(f"( u ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
-                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}, conv_w={model.user_ae.conv.weight.item()}")
-                min_val['u'] = val_loss
+            if val_loss < min_val['u'][1]:
+                min_val['u'] = [epoch, val_loss]
             results = results.append(
                 {'epoch': epoch,
                  'train_rmse': train_loss,
@@ -146,10 +142,8 @@ def train_gae_net(recom_data, args):
                 ignore_index=True)
             train_loss = F.mse_loss(real_train[real_train != 0], p_v[real_train != 0]).item() ** (1/2)
             val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0]).item() ** (1/2)
-            if val_loss < min_val['v']:
-                print(f"( v ) Epoch: {epoch}  --- train_rmse={train_loss:.5f}, "
-                    f"val_rmse={val_loss:.5f}, time={time.time() - t0:.2f}, conv_w={model.item_ae.conv.weight.item()}")
-                min_val['v'] = val_loss
+            if val_loss < min_val['v'][1]:
+                min_val['v'] = [epoch, val_loss]
             results = results.append(
                 {'epoch': epoch,
                  'train_rmse': train_loss,
