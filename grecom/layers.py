@@ -188,11 +188,11 @@ class GraphAutoencoder(torch.nn.Module):
 
 
 class TimeNN(torch.nn.Module):
-    def __init__(self, args, emb_size=32):
+    def __init__(self, args, emb_size=32, n_time_inputs=5):
         super(TimeNN, self).__init__()
-        self.w_aff = Parameter(torch.Tensor(3).to(args.device))
-        self.b_aff = Parameter(torch.Tensor(3).to(args.device))
-        self.w_comb = Parameter(torch.Tensor(3).to(args.device))
+        self.w_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
+        self.b_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
+        self.w_comb = Parameter(torch.Tensor(n_time_inputs).to(args.device))
 
         self.emb_size = emb_size
         self.args = args
