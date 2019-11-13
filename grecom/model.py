@@ -62,6 +62,11 @@ class GAENet(torch.nn.Module):
         self.x_val = (x * self.val_mask)
 
         self.mean_rating = self.x_train[self.x_train != 0].mean()
+        self.mean_u, self.std_u = self.get_rating_statistics('user')
+        self.mean_v, self.std_v = self.get_rating_statistics('item')
+
+        self.x_u = ((x - self.mean_u) / self.std_u) * self.train_mask
+        self.x_v = ((x - self.mean_v) / self.std_v) * self.train_mask
 
         self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
         self.edge_index_v = recom_data.item_graph.edge_index.to(
@@ -74,11 +79,11 @@ class GAENet(torch.nn.Module):
     def forward(self, train='user', is_val=False):
         """mask: size 2*E
         """
-        # Create input features
-        x = self.x_train
+        x_u = self.x_u
+        x_v = self.x_u
         if is_val:
-            p_u = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
-            p_v = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
+            p_u = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u)
+            p_v = self.item_ae(x_v.T, self.edge_index_v, self.edge_weight_v).T
             p_u = nn.Hardtanh(1, 5)(p_u)
             p_v = nn.Hardtanh(1, 5)(p_v)
             p_u = input_unseen_uv(
@@ -89,12 +94,20 @@ class GAENet(torch.nn.Module):
             return pred, p_u, p_v
         else:
             if train == 'user':
-                pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
+                pred = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u)
                 reg_loss = self.user_ae.get_reg_loss()
             elif train == 'item':
-                pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
+                pred = self.item_ae(x_v.T, self.edge_index_v,
+                                    self.edge_weight_v).T
                 reg_loss = self.item_ae.get_reg_loss()
             else:
                 raise ValueError
             return self.x_train, pred, reg_loss
 
+    def get_rating_statistics(self, norm):
+        dim = (0 if norm == 'item' else 1)
+        N = self.train_mask.sum(dim)
+        mean = (self.x_train.sum(dim) / N).unsqueeze(dim)
+        std = (((self.x_train - mean) ** 2).sum(dim) / (N - 1)).sqrt()
+        std = std.unsqueeze(dim)
+        return mean, std
