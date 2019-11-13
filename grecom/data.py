@@ -293,16 +293,37 @@ class RecommenderDataset(object):
         y = y[:len(y)//2]
         rating_index = np.array(self.rating_graph.edge_index)[:, :len(y)]
         rating_index[1, :] = rating_index[1, :] - self.n_users
-        f_norm = lambda x: (x - x.min()) / (x.max() - x.min())
-        abs_t = self.ratings[['timestamp']].apply(f_norm).timestamp.fillna(0.5).values
-        user_t = self.ratings.groupby('user_id').timestamp.apply(f_norm).fillna(0.5).values
-        item_t = self.ratings.groupby('item_id').timestamp.apply(f_norm).fillna(0.5).values
+        global_rt = (
+            self.ratings[['timestamp']].apply(self._to_reltime)
+            .timestamp.fillna(0.5).values)
+        user_rt = (
+            self.ratings.groupby('user_id').timestamp.apply(self._to_reltime)
+            .fillna(0.5).values)
+        item_rt = (
+            self.ratings.groupby('item_id').timestamp.apply(self._to_reltime)
+            .fillna(0.5).values)
+        user_at = (
+            self.ratings.groupby('user_id').timestamp.apply(self._to_abstime)
+            .fillna(0.5).values)
+        item_at = (
+            self.ratings.groupby('item_id').timestamp.apply(self._to_abstime)
+            .fillna(0.5).values)
         m_shape = (self.n_users, self.n_items)
         rating_matrix = coo_matrix((y, rating_index), shape=m_shape).toarray()
         time_matrix = np.stack([
-            coo_matrix((abs_t, rating_index), shape=m_shape).toarray(),
-            coo_matrix((user_t, rating_index), shape=m_shape).toarray(),
-            coo_matrix((item_t, rating_index), shape=m_shape).toarray()])
+            coo_matrix((global_rt, rating_index), shape=m_shape).toarray(),
+            coo_matrix((user_rt, rating_index), shape=m_shape).toarray(),
+            coo_matrix((item_rt, rating_index), shape=m_shape).toarray(),
+            coo_matrix((user_at, rating_index), shape=m_shape).toarray(),
+            coo_matrix((item_at, rating_index), shape=m_shape).toarray()])
         time_matrix = np.transpose(time_matrix, (1, 2, 0))
         return rating_matrix, time_matrix
 
+    @staticmethod
+    def _to_reltime(x):
+        return (x - x.min()) / (x.max() - x.min())
+
+    @staticmethod
+    def _to_abstime(x, scale=3600*24):
+        """scale (seconds)"""
+        return np.log(1 + (x - x.min())/scale)
