@@ -15,6 +15,7 @@ from grecom.parser import parser_recommender
 from grecom.utils import common_processing, EarlyStopping
 
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 TOY = False
 verbose = False
@@ -44,7 +45,7 @@ def train_recom_net(recom_data, args):
 
     results = pd.DataFrame()
     epoch_size = len(train_mask)  # // 4 + 1
-    for epoch in range(args.epochs):
+    for epoch in tqdm(range(args.epochs)):
         t0 = time.time()
         # Training
         model.train()
@@ -96,8 +97,10 @@ def train_gae_net(recom_data, args):
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
-    min_val = {'u+v':[0,np.inf], 'u':[0,np.inf], 'v':[0,np.inf], 'uc':[0,np.inf], 'vc':[0,np.inf], 'uc+vc':[0,np.inf]}
-    for epoch in range(args.epochs):
+    min_val = {}
+    for key in ['u', 'v', 'uc', 'vc', 'u+v', 'uc+vc', 'all']:
+        min_val[key] = [0, np.inf]
+    for epoch in tqdm(range(args.epochs)):
         t0 = time.time()
         # Training
         model.train()
@@ -107,7 +110,8 @@ def train_gae_net(recom_data, args):
             optimizer.zero_grad()
             real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            clf_loss = F.cross_entropy(real[real != 0] - 1, pc[real != 0, :])
+            clf_loss = F.cross_entropy(
+                pc[real != 0, :], (real[real != 0] - 1).type(torch.LongTensor))
             train_loss = mse_loss + reg_loss + clf_loss
             train_loss.backward()
             optimizer.step()
@@ -117,7 +121,8 @@ def train_gae_net(recom_data, args):
             optimizer.zero_grad()
             real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            clf_loss = F.cross_entropy(real[real != 0] - 1, pc[real != 0, :])
+            clf_loss = F.cross_entropy(
+                pc[real != 0, :], (real[real != 0] - 1).type(torch.LongTensor))
             train_loss = mse_loss + reg_loss + clf_loss
             train_loss.backward()
             optimizer.step()
@@ -125,37 +130,25 @@ def train_gae_net(recom_data, args):
         model.eval()
         with torch.no_grad():
             real_train, real_val = model.x_train, model.x_val
-            pred, p_u, p_v, pc_u, pc_v = model(is_val=True)
-            train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)
-            val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
-            if val_loss < min_val['u+v'][1]:
-                min_val['u+v'] = [epoch, val_loss]
-            results = results.append(
-                {'epoch': epoch,
-                 'train_rmse': train_loss,
-                 'val_rmse': val_loss,
-                 'model': 'u+v'},
-                ignore_index=True)
-            train_loss = F.mse_loss(real_train[real_train != 0], p_u[real_train != 0]).item() ** (1/2)
-            val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0]).item() ** (1/2)
-            if val_loss < min_val['u'][1]:
-                min_val['u'] = [epoch, val_loss]
-            results = results.append(
-                {'epoch': epoch,
-                 'train_rmse': train_loss,
-                 'val_rmse': val_loss,
-                 'model': 'u'},
-                ignore_index=True)
-            train_loss = F.mse_loss(real_train[real_train != 0], p_v[real_train != 0]).item() ** (1/2)
-            val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0]).item() ** (1/2)
-            if val_loss < min_val['v'][1]:
-                min_val['v'] = [epoch, val_loss]
-            results = results.append(
-                {'epoch': epoch,
-                 'train_rmse': train_loss,
-                 'val_rmse': val_loss,
-                 'model': 'v'},
-                ignore_index=True)
+            p_u, p_v, pc_u, pc_v = model(is_val=True)
+            pc_u = pc_u.matmul(torch.FloatTensor([1, 2, 3, 4, 5]))
+            pc_v = pc_v.matmul(torch.FloatTensor([1, 2, 3, 4, 5]))
+            pred_dict = {
+                'u': p_u, 'v': p_v, 'uc': pc_u, 'vc': pc_v,
+                'u+v': (p_u + p_v)/2, 'uc+vc': (pc_u + pc_v)/2,
+                'all': (p_u + p_v + pc_u + pc_v)/4
+            }
+            for key, pred in pred_dict.items():
+                train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)
+                val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
+                if val_loss < min_val[key][1]:
+                    min_val[key] = [epoch, val_loss]
+                results = results.append(
+                    {'epoch': epoch,
+                     'train_rmse': train_loss,
+                     'val_rmse': val_loss,
+                     'model': key},
+                    ignore_index=True)
         scheduler.step()
     print(min_val)
     print("U|", model.user_ae.time_model, "time:", model.user_ae.film_time)

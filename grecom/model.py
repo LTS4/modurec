@@ -89,8 +89,8 @@ class GAENet(torch.nn.Module):
                 self.x_train, self.x_val, p_u, self.mean_rating)
             p_v = input_unseen_uv(
                 self.x_train, self.x_val, p_v, self.mean_rating)
-            pred = (p_u + p_v) / 2
-            return pred, p_u, p_v, pc_u, pc_v
+            pc_v = pc_v.transpose(0, 1)
+            return p_u, p_v, pc_u, pc_v
         else:
             real = self.x_train
             if train == 'user':
@@ -104,6 +104,7 @@ class GAENet(torch.nn.Module):
                 pred, pc = self.item_ae(x_v, self.edge_index_v,
                                     self.edge_weight_v, mask=mask)
                 pred = pred.T
+                pc = pc.transpose(0, 1)
                 reg_loss = self.item_ae.get_reg_loss()
             else:
                 raise ValueError
