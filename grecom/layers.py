@@ -160,9 +160,14 @@ class GraphAutoencoder(torch.nn.Module):
         init.normal_(self.conv.weight, std=.01)
         
 
-    def forward(self, x, edge_index, edge_weight=None):
+    def forward(self, x, edge_index, edge_weight=None, mask=None):
+        if mask is not None:
+            x = x[mask, :]
         if self.time_matrix is not None:
-            time_comp = self.time_model(self.time_matrix)
+            if mask is not None:
+                time_comp = self.time_model(self.time_matrix[mask,...])
+            else:
+                time_comp = self.time_model(self.time_matrix)
             x = self.film_time(x, time_comp, mask_add=(x > 0))
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
@@ -170,7 +175,7 @@ class GraphAutoencoder(torch.nn.Module):
         if self.feature_matrix is not None:
             fts_comp = self.feature_model(self.feature_matrix)
             x = self.film_fts(x, fts_comp)
-        x = self.conv(x, edge_index, edge_weight)
+        #x = self.conv(x, edge_index, edge_weight)
         x = self.dropout2(x)
         p = F.linear(x, self.wdec, self.bdec)
         return p

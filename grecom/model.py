@@ -76,14 +76,14 @@ class GAENet(torch.nn.Module):
 
         self.args = args
 
-    def forward(self, train='user', is_val=False):
+    def forward(self, mask=None, train='user', is_val=False):
         """mask: size 2*E
         """
-        x_u = self.x_u
-        x_v = self.x_u
+        x_u = self.x_train
+        x_v = self.x_train.T
         if is_val:
             p_u = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u)
-            p_v = self.item_ae(x_v.T, self.edge_index_v, self.edge_weight_v).T
+            p_v = self.item_ae(x_v, self.edge_index_v, self.edge_weight_v).T
             p_u = nn.Hardtanh(1, 5)(p_u)
             p_v = nn.Hardtanh(1, 5)(p_v)
             p_u = input_unseen_uv(
@@ -93,21 +93,29 @@ class GAENet(torch.nn.Module):
             pred = (p_u + p_v) / 2
             return pred, p_u, p_v
         else:
+            real = self.x_train
             if train == 'user':
-                pred = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u)
+                if mask is not None:
+                    real = self.x_train[mask, :]
+                pred = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u, mask=mask)
                 reg_loss = self.user_ae.get_reg_loss()
             elif train == 'item':
-                pred = self.item_ae(x_v.T, self.edge_index_v,
-                                    self.edge_weight_v).T
+                if mask is not None:
+                    real = self.x_train[:, mask]
+                pred = self.item_ae(x_v, self.edge_index_v,
+                                    self.edge_weight_v, mask=mask).T
                 reg_loss = self.item_ae.get_reg_loss()
             else:
                 raise ValueError
-            return self.x_train, pred, reg_loss
+            return real, pred, reg_loss
 
     def get_rating_statistics(self, norm):
         dim = (0 if norm == 'item' else 1)
         N = self.train_mask.sum(dim)
-        mean = (self.x_train.sum(dim) / N).unsqueeze(dim)
+        mean = (self.x_train.sum(dim) / N)
+        mean[N < 1] = 0
+        mean = mean.unsqueeze(dim)
         std = (((self.x_train - mean) ** 2).sum(dim) / (N - 1)).sqrt()
+        std[N < 2] = 1
         std = std.unsqueeze(dim)
         return mean, std
