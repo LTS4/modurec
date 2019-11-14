@@ -102,19 +102,23 @@ def train_gae_net(recom_data, args):
         # Training
         model.train()
         # User model
-        optimizer.zero_grad()
-        real, pred, reg_loss = model(train='user')
-        mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-        train_loss = mse_loss + reg_loss
-        train_loss.backward()
-        optimizer.step()
+        bs = recom_data.n_users
+        for i in range(0, recom_data.n_users, bs):
+            optimizer.zero_grad()
+            real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
+            mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+            train_loss = mse_loss + reg_loss
+            train_loss.backward()
+            optimizer.step()
         # Item model
-        optimizer.zero_grad()
-        real, pred, reg_loss = model(train='item')
-        mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-        train_loss = mse_loss + reg_loss
-        train_loss.backward()
-        optimizer.step()
+        bs = recom_data.n_items
+        for i in range(0, recom_data.n_items, bs):
+            optimizer.zero_grad()
+            real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
+            mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+            train_loss = mse_loss + reg_loss
+            train_loss.backward()
+            optimizer.step()
         # Validation
         model.eval()
         with torch.no_grad():
