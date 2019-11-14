@@ -102,7 +102,7 @@ def train_gae_net(recom_data, args):
         # Training
         model.train()
         # User model
-        bs = 128
+        bs = recom_data.n_users
         for i in range(0, recom_data.n_users, bs):
             optimizer.zero_grad()
             real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
@@ -111,7 +111,7 @@ def train_gae_net(recom_data, args):
             train_loss.backward()
             optimizer.step()
         # Item model
-        bs = 128
+        bs = recom_data.n_items
         for i in range(0, recom_data.n_items, bs):
             optimizer.zero_grad()
             real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
