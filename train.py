@@ -96,7 +96,7 @@ def train_gae_net(recom_data, args):
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
-    min_val = {'u+v':[0,np.inf], 'u':[0,np.inf], 'v':[0,np.inf]}
+    min_val = {'u+v':[0,np.inf], 'u':[0,np.inf], 'v':[0,np.inf], 'uc':[0,np.inf], 'vc':[0,np.inf], 'uc+vc':[0,np.inf]}
     for epoch in range(args.epochs):
         t0 = time.time()
         # Training
@@ -105,25 +105,27 @@ def train_gae_net(recom_data, args):
         bs = recom_data.n_users
         for i in range(0, recom_data.n_users, bs):
             optimizer.zero_grad()
-            real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
+            real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            train_loss = mse_loss + reg_loss
+            clf_loss = F.cross_entropy(real[real != 0] - 1, pc[real != 0, :])
+            train_loss = mse_loss + reg_loss + clf_loss
             train_loss.backward()
             optimizer.step()
         # Item model
         bs = recom_data.n_items
         for i in range(0, recom_data.n_items, bs):
             optimizer.zero_grad()
-            real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
+            real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            train_loss = mse_loss + reg_loss
+            clf_loss = F.cross_entropy(real[real != 0] - 1, pc[real != 0, :])
+            train_loss = mse_loss + reg_loss + clf_loss
             train_loss.backward()
             optimizer.step()
         # Validation
         model.eval()
         with torch.no_grad():
             real_train, real_val = model.x_train, model.x_val
-            pred, p_u, p_v = model(is_val=True)
+            pred, p_u, p_v, pc_u, pc_v = model(is_val=True)
             train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)
             val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['u+v'][1]:

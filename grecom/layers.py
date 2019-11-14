@@ -141,6 +141,8 @@ class GraphAutoencoder(torch.nn.Module):
         #self.conv = GraphConv1D(emb_size, args).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
+        self.wdec_clf = Parameter(torch.Tensor(5, emb_size, input_size).to(args.device))
+        self.bdec_clf = Parameter(torch.Tensor(input_size, 5).to(args.device))
 
         self.dropout = nn.Dropout(p=0.7)
         self.dropout2 = nn.Dropout(p=0.5)
@@ -157,8 +159,7 @@ class GraphAutoencoder(torch.nn.Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(w)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
-        init.normal_(self.conv.weight, std=.01)
-        
+        init.normal_(self.conv.weight, std=.01)       
 
     def forward(self, x, edge_index, edge_weight=None, mask=None):
         if mask is not None:
@@ -177,8 +178,11 @@ class GraphAutoencoder(torch.nn.Module):
             x = self.film_fts(x, fts_comp)
         #x = self.conv(x, edge_index, edge_weight)
         x = self.dropout2(x)
-        p = F.linear(x, self.wdec, self.bdec)
-        return p
+        p_reg = F.linear(x, self.wdec, self.bdec)
+        x = x.unsqueeze(0) @ self.wdec_clf
+        x = x.transpose(0, 2) + self.bdec_clf
+        p_clf = nn.Softmax(dim=2)(x)
+        return p_reg, p_clf
 
     def get_reg_loss(self):
         reg_loss = self.args.reg / 2 * (
