@@ -187,7 +187,8 @@ class GraphAutoencoder(torch.nn.Module):
     def get_reg_loss(self):
         reg_loss = self.args.reg / 2 * (
             torch.norm(self.wenc) ** 2 +
-            torch.norm(self.wdec) ** 2
+            torch.norm(self.wdec) ** 2 +
+            torch.norm(self.wdec_clf) ** 2
         )
         if self.time_matrix is not None:
             reg_loss += self.time_model.get_reg_loss()

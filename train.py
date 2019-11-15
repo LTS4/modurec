@@ -110,8 +110,9 @@ def train_gae_net(recom_data, args):
             optimizer.zero_grad()
             real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+            clf_target = (real[real != 0] - 1).type(torch.LongTensor).to(args.device)
             clf_loss = F.cross_entropy(
-                pc[real != 0, :], (real[real != 0] - 1).type(torch.LongTensor))
+                pc[real != 0, :], clf_target)
             train_loss = mse_loss + reg_loss + clf_loss
             train_loss.backward()
             optimizer.step()
@@ -121,8 +122,9 @@ def train_gae_net(recom_data, args):
             optimizer.zero_grad()
             real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
+            clf_target = (real[real != 0] - 1).type(torch.LongTensor).to(args.device)
             clf_loss = F.cross_entropy(
-                pc[real != 0, :], (real[real != 0] - 1).type(torch.LongTensor))
+                pc[real != 0, :], clf_target)
             train_loss = mse_loss + reg_loss + clf_loss
             train_loss.backward()
             optimizer.step()

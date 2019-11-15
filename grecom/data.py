@@ -304,10 +304,10 @@ class RecommenderDataset(object):
             .fillna(0.5).values)
         user_at = (
             self.ratings.groupby('user_id').timestamp.apply(self._to_abstime)
-            .fillna(0.5).values)
+            .fillna(0).values)
         item_at = (
             self.ratings.groupby('item_id').timestamp.apply(self._to_abstime)
-            .fillna(0.5).values)
+            .fillna(0).values)
         m_shape = (self.n_users, self.n_items)
         rating_matrix = coo_matrix((y, rating_index), shape=m_shape).toarray()
         time_matrix = np.stack([
