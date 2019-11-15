@@ -98,7 +98,7 @@ def train_gae_net(recom_data, args):
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     min_val = {}
-    for key in ['u', 'v', 'uc', 'vc', 'u+v', 'uc+vc', 'all']:
+    for key in ['u', 'v', 'u+v']:
         min_val[key] = [0, np.inf]
     for epoch in tqdm(range(args.epochs)):
         t0 = time.time()
@@ -108,37 +108,27 @@ def train_gae_net(recom_data, args):
         bs = recom_data.n_users
         for i in range(0, recom_data.n_users, bs):
             optimizer.zero_grad()
-            real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
+            real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_users))), train='user')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            clf_target = (real[real != 0] - 1).type(torch.LongTensor).to(args.device)
-            clf_loss = F.cross_entropy(
-                pc[real != 0, :], clf_target)
-            train_loss = mse_loss + reg_loss + clf_loss
+            train_loss = mse_loss + reg_loss
             train_loss.backward()
             optimizer.step()
         # Item model
         bs = recom_data.n_items
         for i in range(0, recom_data.n_items, bs):
             optimizer.zero_grad()
-            real, pred, pc, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
+            real, pred, reg_loss = model(mask=list(range(i,min(i+bs, recom_data.n_items))), train='item')
             mse_loss = F.mse_loss(real[real != 0], pred[real != 0])
-            clf_target = (real[real != 0] - 1).type(torch.LongTensor).to(args.device)
-            clf_loss = F.cross_entropy(
-                pc[real != 0, :], clf_target)
-            train_loss = mse_loss + reg_loss + clf_loss
+            train_loss = mse_loss + reg_loss
             train_loss.backward()
             optimizer.step()
         # Validation
         model.eval()
         with torch.no_grad():
             real_train, real_val = model.x_train, model.x_val
-            p_u, p_v, pc_u, pc_v = model(is_val=True)
-            pc_u = pc_u.matmul(torch.FloatTensor([1, 2, 3, 4, 5]))
-            pc_v = pc_v.matmul(torch.FloatTensor([1, 2, 3, 4, 5]))
+            p_u, p_v = model(is_val=True)
             pred_dict = {
-                'u': p_u, 'v': p_v, 'uc': pc_u, 'vc': pc_v,
-                'u+v': (p_u + p_v)/2, 'uc+vc': (pc_u + pc_v)/2,
-                'all': (p_u + p_v + pc_u + pc_v)/4
+                'u': p_u, 'v': p_v, 'u+v': (p_u + p_v)/2
             }
             for key, pred in pred_dict.items():
                 train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)

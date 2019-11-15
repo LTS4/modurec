@@ -115,7 +115,7 @@ class GraphAutoencoder(torch.nn.Module):
         # FiLM time
         self.time_matrix = time_matrix
         if time_matrix is not None:
-            self.time_model = TimeNN(args)
+            self.time_model = TimeNN(args, n_time_inputs=time_matrix.shape[-1])
             self.time_ndim = time_ndim
             film_size = {
                 0: 1,
@@ -176,13 +176,10 @@ class GraphAutoencoder(torch.nn.Module):
         if self.feature_matrix is not None:
             fts_comp = self.feature_model(self.feature_matrix)
             x = self.film_fts(x, fts_comp)
-        # x = self.conv(x, edge_index, edge_weight)
+        x = self.conv(x, edge_index, edge_weight)
         x = self.dropout2(x)
-        p_reg = F.linear(x, self.wdec, self.bdec)
-        x = x.unsqueeze(0) @ self.wdec_clf
-        x = x.permute(1, 2, 0) + self.bdec_clf
-        p_clf = nn.Softmax(dim=2)(x)
-        return p_reg, p_clf
+        p = F.linear(x, self.wdec, self.bdec)
+        return p
 
     def get_reg_loss(self):
         reg_loss = self.args.reg / 2 * (

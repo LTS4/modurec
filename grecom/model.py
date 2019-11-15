@@ -81,34 +81,32 @@ class GAENet(torch.nn.Module):
         x_u = self.x_train
         x_v = self.x_train.T
         if is_val:
-            p_u, pc_u = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u)
-            p_v, pc_v = self.item_ae(x_v, self.edge_index_v, self.edge_weight_v)
+            p_u = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u)
+            p_v = self.item_ae(x_v, self.edge_index_v, self.edge_weight_v)
             p_u = nn.Hardtanh(1, 5)(p_u)
             p_v = nn.Hardtanh(1, 5)(p_v.T)
             p_u = input_unseen_uv(
                 self.x_train, self.x_val, p_u, self.mean_rating)
             p_v = input_unseen_uv(
                 self.x_train, self.x_val, p_v, self.mean_rating)
-            pc_v = pc_v.transpose(0, 1)
-            return p_u, p_v, pc_u, pc_v
+            return p_u, p_v
         else:
             real = self.x_train
             if train == 'user':
                 if mask is not None:
                     real = self.x_train[mask, :]
-                pred, pc = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u, mask=mask)
+                pred = self.user_ae(x_u, self.edge_index_u, self.edge_weight_u, mask=mask)
                 reg_loss = self.user_ae.get_reg_loss()
             elif train == 'item':
                 if mask is not None:
                     real = self.x_train[:, mask]
-                pred, pc = self.item_ae(x_v, self.edge_index_v,
+                pred = self.item_ae(x_v, self.edge_index_v,
                                     self.edge_weight_v, mask=mask)
                 pred = pred.T
-                pc = pc.transpose(0, 1)
                 reg_loss = self.item_ae.get_reg_loss()
             else:
                 raise ValueError
-            return real, pred, pc, reg_loss
+            return real, pred, reg_loss
 
     def get_rating_statistics(self, norm):
         dim = (0 if norm == 'item' else 1)
