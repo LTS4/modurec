@@ -61,8 +61,8 @@ class GAENet(torch.nn.Module):
         # Create input features
         x = self.x_train
         if is_val:
-            p_u = self.user_ae(x, self.edge_index_u)
-            p_v = self.item_ae(x.T, self.edge_index_v)
+            p_u = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
+            p_v = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v)
             p_u = nn.Hardtanh(1, 5)(p_u)
             p_v = nn.Hardtanh(1, 5)(p_v.T)
             p_u = input_unseen_uv(self.x_train, self.x_val, p_u, self.mean_rating)
