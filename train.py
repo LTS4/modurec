@@ -15,6 +15,7 @@ from grecom.parser import parser_recommender
 from grecom.utils import common_processing, EarlyStopping
 
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 TOY = False
 verbose = False
@@ -81,23 +82,39 @@ def train_recom_net(recom_data, args):
 
 def train_gae_net(recom_data, args):
     # Create masks
-    non_zero = np.where(recom_data.rating_matrix != 0)
-    train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2, random_state=1)
-    val_inds, test_inds = train_test_split(val_inds, test_size=0.5, random_state=1)
-    if args.testing:
-        train_inds = np.concatenate([train_inds, val_inds])
-        val_inds = test_inds.copy()
+    if args.dataset == 'ml-100k':
+        train_df = pd.read_csv(
+            os.path.join(recom_data.raw_dir, 'u1.base'), sep='\t', header=None,
+                         names=['u', 'v', 'r', 't'], engine='python')
+        test_df = pd.read_csv(
+            os.path.join(recom_data.raw_dir, 'u1.test'), sep='\t', header=None,
+                         names=['u', 'v', 'r', 't'], engine='python')
+        train_inds = (
+            np.array([recom_data.dict_user_ar[x] for x in train_df.u]),
+            np.array([recom_data.dict_item_ar[x] for x in train_df.v]) - recom_data.n_users
+        )
+        val_inds = (
+            np.array([recom_data.dict_user_ar[x] for x in test_df.u]),
+            np.array([recom_data.dict_item_ar[x] for x in test_df.v]) - recom_data.n_users
+        )
+    else:
+        non_zero = np.where(recom_data.rating_matrix != 0)
+        train_inds, val_inds = train_test_split(np.array(non_zero), test_size=0.2)
+        val_inds, test_inds = train_test_split(val_inds, test_size=0.5)
+        if args.testing:
+            train_inds = np.concatenate([train_inds, val_inds])
+            val_inds = test_inds.copy()
 
     train_mask = np.zeros_like(recom_data.rating_matrix)
-    train_mask[tuple(train_inds.T)] = 1
+    train_mask[tuple(train_inds)] = 1
     val_mask = np.zeros_like(recom_data.rating_matrix)
-    val_mask[tuple(val_inds.T)] = 1
+    val_mask[tuple(val_inds)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     min_val = {'u+v':[0,np.inf], 'u':[0,np.inf], 'v':[0,np.inf]}
-    for epoch in range(args.epochs):
+    for epoch in tqdm(range(args.epochs)):
         t0 = time.time()
         # Training
         model.train()
