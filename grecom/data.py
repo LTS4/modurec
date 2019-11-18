@@ -164,8 +164,17 @@ class RecommenderDataset(object):
         movie_df = pd.read_csv(os.path.join(self.raw_dir, 'u.item'), sep=r'|', header=None,
                                names=movie_headers, engine='python')
 
-        raise NotImplementedError
-    
+        genre_headers = movie_df.columns.values[6:]
+        num_genres = genre_headers.shape[0]
+        
+        # extract year
+        movie_df['year_norm'] = movie_df.title.str.slice(-5, -1).astype(int) / 10
+        assert not (movie_df.year < (1800 / 10)).any()
+
+        ids = movie_df['movie id'].astype(int).values
+        item_fts = movie_df[['year_norm'] + genre_headers].values
+        return pd.DataFrame({'item_id': ids, 'features': item_fts})
+
     def preprocess_item_features_ml1m(self):
         # Need to execute first "import standfordnlp; stanfordnlp.download('en', force=True)"
         all_genres = ['Action', 'Adventure', 'Animation', "Children's", 'Comedy',
@@ -192,9 +201,9 @@ class RecommenderDataset(object):
                 assert re.match(r'.*\([0-9]{4}\)$', title)
                 year = title[-5:-1]
 
-                features[0] = int(year) / 10  # Year difference that I feel significant
+                features[0] = int(year) / 10  # Year difference normalizer
                 for g in genres_set:
-                    features[1 + genres_dict[g]] = 1 / np.sqrt(2)  # TODO: normalize for any similarity function
+                    features[1 + genres_dict[g]] = 1 / np.sqrt(2)
                 item_fts.append(features)
 
                 # process title
@@ -202,8 +211,10 @@ class RecommenderDataset(object):
                 doc = nlp(title)
                 words = set()
                 for s in doc.sentences:
-                    words.update(w.lemma.lower() for w in s.words
-                                 if not re.fullmatch(r'[' + string.punctuation + ']+', w.lemma))
+                    words.update(
+                        w.lemma.lower() for w in s.words
+                        if not re.fullmatch(
+                            r'[' + string.punctuation + ']+', w.lemma))
                 vocab.update(words)
                 title_words.append(words)
 
@@ -220,7 +231,8 @@ class RecommenderDataset(object):
         ratings = []
         with open(os.path.join(self.raw_dir, 'ratings.dat')) as f:
             for l in f:
-                user_id, movie_id, rating, timestamp = [int(_) for _ in l.split('::')]
+                user_id, movie_id, rating, timestamp = [
+                    int(_) for _ in l.split('::')]
                 ratings.append({
                     'user_id': user_id,
                     'item_id': movie_id,
@@ -232,7 +244,10 @@ class RecommenderDataset(object):
         item_count.name = 'item_count'
         user_count = ratings['user_id'].value_counts()
         user_count.name = 'user_count'
-        ratings = ratings.join(item_count, on='item_id').join(user_count, on='user_id')
+        ratings = (
+            ratings
+            .join(item_count, on='item_id')
+            .join(user_count, on='user_id'))
         return ratings
 
     def create_rating_graph(self):
@@ -256,7 +271,8 @@ class RecommenderDataset(object):
         n_edges = len(self.rating_graph.edge_index[0])
         assert n_edges % 2 == 0
         n_ratings = n_edges // 2
-        train_mask, test_mask = train_test_split(np.array(range(n_ratings)), test_size=0.1, random_state=1)
+        train_mask, test_mask = train_test_split(
+            np.array(range(n_ratings)), test_size=0.1, random_state=1)
         train_mask = np.concatenate([train_mask, train_mask + n_ratings])
         test_mask = np.concatenate([test_mask, test_mask + n_ratings])
         return train_mask, test_mask
@@ -266,25 +282,33 @@ class RecommenderDataset(object):
         item_ids = [self.dict_item_ar[x] for x in abs_item_ids]
         # Add neighbor items
         item_edge_index = to_undirected(self.item_graph.edge_index)
-        edge_ids = [i for i, x in enumerate(item_edge_index[0]) if x in item_ids] + [i for i, x in
-                                                                                     enumerate(item_edge_index[1]) if
-                                                                                     x in item_ids]
+        edge_ids = [
+            i for i, x in enumerate(item_edge_index[0]) if x in item_ids
+        ] + [i for i, x in enumerate(item_edge_index[1]) if x in item_ids]
         item_edge_index = item_edge_index[:, edge_ids]
         new_item_ids = item_edge_index.unique()
         # Add neighbor users
-        edge_ids = [i for i, x in enumerate(self.rating_graph.edge_index[0]) if x in item_ids]
-        edge_ids += [i for i, x in enumerate(self.rating_graph.edge_index[1]) if x in item_ids]
+        edge_ids = [
+            i for i, x in enumerate(self.rating_graph.edge_index[0])
+            if x in item_ids]
+        edge_ids += [
+            i for i, x in enumerate(self.rating_graph.edge_index[1])
+            if x in item_ids]
         rating_edge_index = self.rating_graph.edge_index[:, edge_ids]
         new_user_ids = rating_edge_index.unique()
         new_user_ids = new_user_ids[new_user_ids < self.n_users][:10]
         # Overwrite with subgraphs
         all_ids = torch.cat([new_user_ids, new_item_ids])
 
-        self.similar_graph.edge_index = subgraph(all_ids, self.similar_graph.edge_index)[0]
-        self.rating_graph.edge_index = subgraph(all_ids, self.rating_graph.edge_index)[0]
+        self.similar_graph.edge_index = subgraph(
+            all_ids, self.similar_graph.edge_index)[0]
+        self.rating_graph.edge_index = subgraph(
+            all_ids, self.rating_graph.edge_index)[0]
         df = self.ratings
         self.ratings = df.loc[
-            df.item_id.isin([self.dict_item_ra[x.item()] for x in new_item_ids]) & df.user_id.isin(
+            df.item_id.isin(
+                [self.dict_item_ra[x.item()] for x in new_item_ids]) &
+            df.user_id.isin(
                 [self.dict_user_ra[x.item()] for x in new_user_ids])]
 
     def create_rating_matrices(self):
