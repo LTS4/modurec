@@ -141,8 +141,8 @@ class GraphAutoencoder(torch.nn.Module):
         #self.conv = GraphConv1D(emb_size, args).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
-        self.wdec_clf = Parameter(torch.Tensor(5, emb_size, input_size).to(args.device))
-        self.bdec_clf = Parameter(torch.Tensor(1, input_size, 5).to(args.device))
+        #self.wdec_clf = Parameter(torch.Tensor(5, emb_size, input_size).to(args.device))
+        #self.bdec_clf = Parameter(torch.Tensor(1, input_size, 5).to(args.device))
 
         self.dropout = nn.Dropout(p=0.7)
         self.dropout2 = nn.Dropout(p=0.5)
@@ -184,8 +184,7 @@ class GraphAutoencoder(torch.nn.Module):
     def get_reg_loss(self):
         reg_loss = self.args.reg / 2 * (
             torch.norm(self.wenc) ** 2 +
-            torch.norm(self.wdec) ** 2 +
-            torch.norm(self.wdec_clf) ** 2
+            torch.norm(self.wdec) ** 2
         )
         if self.time_matrix is not None:
             reg_loss += self.time_model.get_reg_loss()
@@ -197,6 +196,7 @@ class GraphAutoencoder(torch.nn.Module):
 class TimeNN(torch.nn.Module):
     def __init__(self, args, emb_size=32, n_time_inputs=5):
         super(TimeNN, self).__init__()
+        self.w2_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.w_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.b_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.w_comb = Parameter(torch.Tensor(n_time_inputs).to(args.device))
@@ -206,18 +206,20 @@ class TimeNN(torch.nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        for w in [self.w_comb, self.w_aff, self.b_aff]:
+        for w in [self.w_comb, self.w_aff, self.b_aff, self.w2_aff]:
             init.normal_(w, std=0.1)
 
     def forward(self, x):
-        x = x * self.w_aff + self.b_aff
+        x = (x ** 2) * self.w2_aff + x * self.w_aff + self.b_aff
         x = nn.ReLU()(x)  # Allows deactivation of some time inputs
         p = torch.matmul(x, self.w_comb)
         return p
 
     def get_reg_loss(self):
         return self.args.reg * (
-            torch.norm(self.w_comb) ** 2
+            torch.norm(self.w_comb) ** 2 + 
+            torch.norm(self.w_aff) ** 2 + 
+            torch.norm(self.w2_aff) ** 2
         )
     
     def __repr__(self):
