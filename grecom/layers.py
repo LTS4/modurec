@@ -118,7 +118,7 @@ class GraphAutoencoder(torch.nn.Module):
         self.time_ndim = time_ndim
         self.rating_add = Parameter(torch.FloatTensor(1).to(args.device))
         if time_matrix is not None:
-            self.time_model = TimeNN(args)
+            self.time_model = TimeNN(args, n_time_inputs=time_matrix.shape[-1])
             if time_ndim == 0:
                 self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
                 self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))

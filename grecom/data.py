@@ -104,17 +104,25 @@ class RecommenderDataset(object):
             return self.preprocess_user_features_ml1m()
 
     def preprocess_user_features_ml100k(self):
-        user_fts = []
-        ids = []
-        with open(os.path.join(self.raw_dir, 'u.user')) as f:
-            for l in f:
-                id_, age, gender, occupation, _ = l.strip().split('|')
-                features = np.zeros(23)
-                features[0] = 0 if gender == 'M' else 1
-                features[1] = (int(age) - 1) / 55
-                features[2 + int(occupation)] = 1 / np.sqrt(2)
-                user_fts.append(features)
-                ids.append(int(id_))
+        cols = ['id', 'age', 'gender', 'occupation', 'zipcode']
+        df_user = pd.read_csv(
+            os.path.join(self.raw_dir, 'u.user'),
+            sep=r'|', header=None, names=cols, engine='python')
+        df_occ = pd.read_csv(
+            os.path.join(self.raw_dir, 'u.occupation'),
+            header=None, engine='python', names=['occupation']
+        )
+        df_occ = pd.DataFrame(df_occ).reset_index()
+        df_occ = df_occ.rename(columns={'index': 'occ_int'})
+        df_user = df_user.merge(df_occ, on='occupation')
+        del df_user['occupation']
+        del df_user['zipcode']
+        df_user['gender'] = [0 if x == 'M' else 1 for x in df_user.gender]
+        df_user['age'] = (df_user.age.astype(int) - 1) / 55
+        df_user = pd.get_dummies(df_user, columns=['occ_int'])
+        df_user.iloc[:, 3:] /= np.sqrt(2)
+        ids = df_user.id.values
+        user_fts = list(df_user.iloc[:, 3:].values)
         return pd.DataFrame({'user_id': ids, 'features': user_fts})
 
     def preprocess_user_features_ml1m(self):
@@ -156,7 +164,7 @@ class RecommenderDataset(object):
             return self.preprocess_item_features_ml1m()
 
     def preprocess_item_features_ml100k(self):
-        movie_headers = ['movie id', 'movie title', 'release date', 'video release date',
+        movie_headers = ['id', 'title', 'rel_date', 'video release date',
                          'IMDb URL', 'unknown', 'Action', 'Adventure', 'Animation',
                          'Childrens', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy',
                          'Film-Noir', 'Horror', 'Musical', 'Mystery', 'Romance', 'Sci-Fi',
@@ -164,15 +172,16 @@ class RecommenderDataset(object):
         movie_df = pd.read_csv(os.path.join(self.raw_dir, 'u.item'), sep=r'|', header=None,
                                names=movie_headers, engine='python')
 
-        genre_headers = movie_df.columns.values[6:]
-        num_genres = genre_headers.shape[0]
-        
+        genre_headers = list(movie_df.columns.values[6:])
+        num_genres = len(genre_headers)
         # extract year
-        movie_df['year_norm'] = movie_df.title.str.slice(-5, -1).astype(int) / 10
-        assert not (movie_df.year < (1800 / 10)).any()
+        movie_df['year_norm'] = [
+            int(x[-4:]) / 10 if isinstance(x, str)
+            else 1995 / 10 for x in movie_df.rel_date]
+        assert not (movie_df.year_norm < (1800 / 10)).any()
 
-        ids = movie_df['movie id'].astype(int).values
-        item_fts = movie_df[['year_norm'] + genre_headers].values
+        ids = movie_df.id.astype(int).values
+        item_fts = list(movie_df[['year_norm'] + genre_headers].values)
         return pd.DataFrame({'item_id': ids, 'features': item_fts})
 
     def preprocess_item_features_ml1m(self):
@@ -228,6 +237,31 @@ class RecommenderDataset(object):
         return pd.DataFrame({'item_id': ids, 'features': item_fts})
 
     def create_dataframe_ratings(self):
+        """Reads the raw files and generates a ratings dataframe
+
+        :return: DataFrame pandas
+        :rtype: pandas.DataFrame
+        """
+        if self.args.dataset == 'ml-100k':
+            return self.create_dataframe_ratings_ml100k()
+        elif self.args.dataset == 'ml-1m':
+            return self.create_dataframe_ratings_ml1m()
+
+    def create_dataframe_ratings_ml100k(self):
+        cols = ['user_id', 'item_id', 'rating', 'timestamp']
+        ratings = pd.read_csv(os.path.join(self.raw_dir, 'u.data'), sep='\t', header=None,
+                              names=cols, engine='python')
+        item_count = ratings['item_id'].value_counts()
+        item_count.name = 'item_count'
+        user_count = ratings['user_id'].value_counts()
+        user_count.name = 'user_count'
+        ratings = (
+            ratings
+            .join(item_count, on='item_id')
+            .join(user_count, on='user_id'))
+        return ratings
+
+    def create_dataframe_ratings_ml1m(self):
         ratings = []
         with open(os.path.join(self.raw_dir, 'ratings.dat')) as f:
             for l in f:

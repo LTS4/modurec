@@ -1,8 +1,9 @@
-for i in {1..5}
+for i in {1..1}
 do
     python train.py \
-    --data-path data --raw-path raw --models-path models --results-path results \
-    --dataset ml-1m \
+    --data-path data --raw-path raw \
+    --models-path models --results-path results \
+    --dataset ml-100k \
     --model gautorec \
     --reg 1e-4 --lr 2e-3 \
     --epochs 2500 \
