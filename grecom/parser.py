@@ -35,6 +35,7 @@ def parser_recommender():
                         choices=['ml-100k', 'ml-1m'])
     parser.add_argument('--model', type=str, help='model',
                         choices=['hetero_gcmc', 'gautorec'])
+    parser.add_argument('--no-time', action='store_true', default=False)
     parser.add_argument('--reg', type=float, default=0.001,
                         help='regularization parameter')
     common_parser(parser)
