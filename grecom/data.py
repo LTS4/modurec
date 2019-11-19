@@ -43,25 +43,32 @@ class RecommenderDataset(object):
         self.ratings = self.create_dataframe_ratings()
         self.create_global_indices()
 
-        self.rating_graph = self.create_rating_graph()
+        if args.dataset not in ('ml-10m', 'ml-20m'):
+            self.rating_graph = self.create_rating_graph()
 
-        # Create user and item similarity graphs
-        self.user_graph = self.create_user_graph()
-        self.item_graph = self.create_item_graph()
-        self.similar_graph = self.create_similar_graph()
+            # Create user and item similarity graphs
+            self.user_graph = self.create_user_graph()
+            self.item_graph = self.create_item_graph()
+            self.similar_graph = self.create_similar_graph()
 
         self.rating_matrix, self.time_matrix = self.create_rating_matrices()
 
     def select_url(self):
         return {
             'ml-100k': 'http://files.grouplens.org/datasets/movielens/ml-100k.zip',
-            'ml-1m': 'http://files.grouplens.org/datasets/movielens/ml-1m.zip'
+            'ml-1m': 'http://files.grouplens.org/datasets/movielens/ml-1m.zip',
+            'ml-10m': 'http://files.grouplens.org/datasets/movielens/ml-10m.zip',
+            'ml-20m': 'http://files.grouplens.org/datasets/movielens/ml-20m.zip'
         }[self.args.dataset]
 
     def download(self):
         path = download_url(self.url, self.args.raw_path)
         extract_zip(path, self.args.raw_path)
         os.unlink(path)
+        if self.args.dataset == 'ml-10m':
+            os.rename(
+                self.args.raw_path + '/ml-10M100K',
+                self.args.raw_path + '/ml-10m')
 
     def create_global_indices(self):
         user_ids = np.unique(np.concatenate(
@@ -91,7 +98,7 @@ class RecommenderDataset(object):
                     num_nodes=self.n_users,
                     ids=self.users.user_id.values,
                     x=torch.eye(self.n_users))
-    
+
     def preprocess_user_features(self):
         """Reads the raw files and generates a feature vector for each user
 
@@ -102,6 +109,8 @@ class RecommenderDataset(object):
             return self.preprocess_user_features_ml100k()
         elif self.args.dataset == 'ml-1m':
             return self.preprocess_user_features_ml1m()
+        else:
+            return pd.DataFrame(columns=['user_id'])
 
     def preprocess_user_features_ml100k(self):
         cols = ['id', 'age', 'gender', 'occupation', 'zipcode']
@@ -162,6 +171,10 @@ class RecommenderDataset(object):
             return self.preprocess_item_features_ml100k()
         elif self.args.dataset == 'ml-1m':
             return self.preprocess_item_features_ml1m()
+        elif self.args.dataset == 'ml-10m':
+            return self.preprocess_item_features_ml10m()
+        elif self.args.dataset == 'ml-20m':
+            return self.preprocess_item_features_ml20m()
 
     def preprocess_item_features_ml100k(self):
         movie_headers = ['id', 'title', 'rel_date', 'video release date',
@@ -236,6 +249,34 @@ class RecommenderDataset(object):
             item_fts[i] = np.concatenate([item_fts[i], title_fts], axis=None)
         return pd.DataFrame({'item_id': ids, 'features': item_fts})
 
+    def preprocess_item_features_ml10m(self):
+        df = pd.read_csv(
+            os.path.join(self.raw_dir, 'movies.dat'), sep=r'::', header=None,
+            names=['id', 'title', 'genres'], engine='python')
+        df = df.join(df.pop('genres').str.get_dummies('|'))
+        # extract year
+        df['year_norm'] = df.title.str.slice(-5, -1).astype(int) / 10
+        assert not (df.year_norm < (1800 / 10)).any()
+
+        ids = df.id.astype(int).values
+        item_fts = list(df.iloc[:, 3:].values)
+        return pd.DataFrame({'item_id': ids, 'features': item_fts})
+
+    def preprocess_item_features_ml20m(self):
+        df = pd.read_csv(
+            os.path.join(self.raw_dir, 'movies.csv'),
+            sep=r',', engine='python')
+        df = df.join(df.pop('genres').str.get_dummies('|'))
+        # extract year
+        df['year_norm'] = (
+            df.title.str.extract("\((\d{4})\)", expand=True)
+            .fillna(1995).astype(float) / 10
+        )
+        assert not (df.year_norm < (1800 / 10)).any()
+        ids = df.movieId.astype(int).values
+        item_fts = list(df.iloc[:, 3:].values)
+        return pd.DataFrame({'item_id': ids, 'features': item_fts})
+
     def create_dataframe_ratings(self):
         """Reads the raw files and generates a ratings dataframe
 
@@ -246,6 +287,10 @@ class RecommenderDataset(object):
             return self.create_dataframe_ratings_ml100k()
         elif self.args.dataset == 'ml-1m':
             return self.create_dataframe_ratings_ml1m()
+        elif self.args.dataset == 'ml-10m':
+            return self.create_dataframe_ratings_ml10m()
+        elif self.args.dataset == 'ml-20m':
+            return self.create_dataframe_ratings_ml20m()
 
     def create_dataframe_ratings_ml100k(self):
         cols = ['user_id', 'item_id', 'rating', 'timestamp']
@@ -267,6 +312,52 @@ class RecommenderDataset(object):
             for l in f:
                 user_id, movie_id, rating, timestamp = [
                     int(_) for _ in l.split('::')]
+                ratings.append({
+                    'user_id': user_id,
+                    'item_id': movie_id,
+                    'rating': rating,
+                    'timestamp': timestamp,
+                })
+        ratings = pd.DataFrame(ratings)
+        item_count = ratings['item_id'].value_counts()
+        item_count.name = 'item_count'
+        user_count = ratings['user_id'].value_counts()
+        user_count.name = 'user_count'
+        ratings = (
+            ratings
+            .join(item_count, on='item_id')
+            .join(user_count, on='user_id'))
+        return ratings
+
+    def create_dataframe_ratings_ml10m(self):
+        ratings = []
+        with open(os.path.join(self.raw_dir, 'ratings.dat')) as f:
+            for l in f:
+                user_id, movie_id, rating, timestamp = [
+                    float(_) for _ in l.split('::')]  # rating is float!
+                ratings.append({
+                    'user_id': user_id,
+                    'item_id': movie_id,
+                    'rating': rating,
+                    'timestamp': timestamp,
+                })
+        ratings = pd.DataFrame(ratings)
+        item_count = ratings['item_id'].value_counts()
+        item_count.name = 'item_count'
+        user_count = ratings['user_id'].value_counts()
+        user_count.name = 'user_count'
+        ratings = (
+            ratings
+            .join(item_count, on='item_id')
+            .join(user_count, on='user_id'))
+        return ratings
+
+    def create_dataframe_ratings_ml20m(self):
+        ratings = []
+        with open(os.path.join(self.raw_dir, 'ratings.csv')) as f:
+            for l in f:
+                user_id, movie_id, rating, timestamp = [
+                    float(_) for _ in l.split(',')]  # rating is float!
                 ratings.append({
                     'user_id': user_id,
                     'item_id': movie_id,
@@ -346,10 +437,10 @@ class RecommenderDataset(object):
                 [self.dict_user_ra[x.item()] for x in new_user_ids])]
 
     def create_rating_matrices(self):
-        y = self.rating_graph.y
-        assert len(y) % 2 == 0
-        y = y[:len(y)//2]
-        rating_index = np.array(self.rating_graph.edge_index)[:, :len(y)]
+        y = torch.tensor(self.ratings.rating.values, dtype=torch.float)
+        user_ids = self.ratings.user_id.map(self.dict_user_ar)
+        item_ids = self.ratings.item_id.map(self.dict_item_ar)
+        rating_index = np.array([user_ids, item_ids])
         rating_index[1, :] = rating_index[1, :] - self.n_users
         global_rt = (
             self.ratings[['timestamp']].apply(self._to_reltime)
@@ -367,13 +458,13 @@ class RecommenderDataset(object):
             self.ratings.groupby('item_id').timestamp.apply(self._to_abstime)
             .fillna(0.5).values)
         m_shape = (self.n_users, self.n_items)
-        rating_matrix = coo_matrix((y, rating_index), shape=m_shape).toarray()
+        rating_matrix = coo_matrix((y, rating_index), shape=m_shape).astype(np.float32).toarray()
         time_matrix = np.stack([
-            coo_matrix((global_rt, rating_index), shape=m_shape).toarray(),
-            coo_matrix((user_rt, rating_index), shape=m_shape).toarray(),
-            coo_matrix((item_rt, rating_index), shape=m_shape).toarray(),
-            coo_matrix((user_at, rating_index), shape=m_shape).toarray(),
-            coo_matrix((item_at, rating_index), shape=m_shape).toarray()])
+            coo_matrix((global_rt, rating_index), shape=m_shape).astype(np.float32).toarray(),
+            coo_matrix((user_rt, rating_index), shape=m_shape).astype(np.float32).toarray(),
+            coo_matrix((item_rt, rating_index), shape=m_shape).astype(np.float32).toarray(),
+            coo_matrix((user_at, rating_index), shape=m_shape).astype(np.float32).toarray(),
+            coo_matrix((item_at, rating_index), shape=m_shape).astype(np.float32).toarray()])
         time_matrix = np.transpose(time_matrix, (1, 2, 0))
         return rating_matrix, time_matrix
 
