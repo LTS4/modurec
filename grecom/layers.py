@@ -109,7 +109,7 @@ class GraphConv1D(MessagePassing):
 
 
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, input_size, args, emb_size=500, feature_matrix=None, time_matrix=None, time_ndim=0, feature_ndim=0):
+    def __init__(self, input_size, args, emb_size=500, feature_matrices=None, time_matrix=None, time_ndim=0, feature_ndim=0):
         super(GraphAutoencoder, self).__init__()
 
         # FiLM time
@@ -124,15 +124,17 @@ class GraphAutoencoder(torch.nn.Module):
             self.film_time = FiLMlayer(args, film_size)
             
         # FiLM features
-        self.feature_matrix = feature_matrix
-        if feature_matrix is not None:
-            self.feature_model = FeatureNN(args, feature_matrix.size(1))
+        self.feature_matrices = feature_matrices
+        if feature_matrices is not None:
+            ft_sizes = [x.size(1) for x in feature_matrices]
+            self.feature_model = FeatureNN(args, ft_sizes)
             self.feature_ndim = feature_ndim
             film_size = {
                 0: 1,
-                1: emb_size
+                1: input_size
             }[feature_ndim]
-            self.film_fts = FiLMlayer(args, film_size)
+            self.film_1 = FiLMlayer(args, film_size)
+            self.film_2 = FiLMlayer(args, film_size)
         
         # Autoencoder
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
@@ -159,7 +161,7 @@ class GraphAutoencoder(torch.nn.Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(w)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(b, -bound, bound)
-        init.normal_(self.conv.weight, std=.01)       
+        init.normal_(self.conv.weight, std=.01)
 
     def forward(self, x, edge_index, edge_weight=None, mask=None):
         if mask is not None:
@@ -170,12 +172,13 @@ class GraphAutoencoder(torch.nn.Module):
             else:
                 time_comp = self.time_model(self.time_matrix)
             x = self.film_time(x, time_comp, mask_add=(x > 0))
+        if self.feature_matrices is not None:
+            fts_1, fts_2 = self.feature_model(self.feature_matrices)
+            x = self.film_1(x, fts_1, mask_add=(x > 0))
+            x = self.film_2(x, fts_2, mask_add=(x > 0))
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
-        if self.feature_matrix is not None:
-            fts_comp = self.feature_model(self.feature_matrix)
-            x = self.film_fts(x, fts_comp)
         x = self.conv(x, edge_index, edge_weight)
         x = self.dropout2(x)
         p = F.linear(x, self.wdec, self.bdec)
@@ -188,7 +191,7 @@ class GraphAutoencoder(torch.nn.Module):
         )
         if self.time_matrix is not None:
             reg_loss += self.time_model.get_reg_loss()
-        if self.feature_matrix is not None:
+        if self.feature_matrices is not None:
             reg_loss += self.feature_model.get_reg_loss()
         return reg_loss
 
@@ -196,7 +199,6 @@ class GraphAutoencoder(torch.nn.Module):
 class TimeNN(torch.nn.Module):
     def __init__(self, args, emb_size=32, n_time_inputs=5):
         super(TimeNN, self).__init__()
-        self.w2_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.w_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.b_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.w_comb = Parameter(torch.Tensor(n_time_inputs).to(args.device))
@@ -206,11 +208,11 @@ class TimeNN(torch.nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        for w in [self.w_comb, self.w_aff, self.b_aff, self.w2_aff]:
+        for w in [self.w_comb, self.w_aff, self.b_aff]:
             init.normal_(w, std=0.1)
 
     def forward(self, x):
-        x = (x ** 2) * self.w2_aff + x * self.w_aff + self.b_aff
+        x = x * self.w_aff + self.b_aff
         x = nn.ReLU()(x)  # Allows deactivation of some time inputs
         p = torch.matmul(x, self.w_comb)
         return p
@@ -218,48 +220,42 @@ class TimeNN(torch.nn.Module):
     def get_reg_loss(self):
         return self.args.reg * (
             torch.norm(self.w_comb) ** 2 + 
-            torch.norm(self.w_aff) ** 2 + 
-            torch.norm(self.w2_aff) ** 2
+            torch.norm(self.w_aff) ** 2
         )
-    
+
     def __repr__(self):
         return f"w_aff: {self.w_aff}, b_aff:{self.b_aff}, w_comb:{self.w_comb}"
 
 
 class FeatureNN(torch.nn.Module):
-    def __init__(self, args, ft_size, emb_size=500):
+    def __init__(self, args, ft_sizes, emb_size=500):
         super(FeatureNN, self).__init__()
-        self.scale = Parameter(torch.FloatTensor(ft_size).to(args.device))
-        self.wenc = Parameter(torch.FloatTensor(10, ft_size).to(args.device))
-        self.benc = Parameter(torch.FloatTensor(10).to(args.device))
-        self.wdec = Parameter(torch.FloatTensor(emb_size, 10).to(args.device))
-        self.bdec = Parameter(torch.FloatTensor(emb_size).to(args.device))
+        self.w_u = Parameter(torch.FloatTensor(1, ft_sizes[0]).to(args.device))
+        self.b_u = Parameter(torch.FloatTensor(1).to(args.device))
+        self.w_v = Parameter(torch.FloatTensor(1, ft_sizes[1]).to(args.device))
+        self.b_v = Parameter(torch.FloatTensor(1).to(args.device))
 
-        self.dropout = nn.Dropout(0.7)
-        self.dropout2 = nn.Dropout(0.5)
         self.args = args
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.xavier_normal_(self.wenc)
-        init.xavier_normal_(self.wdec)
-        init.zeros_(self.benc)
-        init.zeros_(self.bdec)
-        init.ones_(self.scale)
+        init.xavier_normal_(self.w_u)
+        init.zeros_(self.b_u)
+        init.xavier_normal_(self.w_v)
+        init.zeros_(self.b_v)
 
-    def forward(self, x):
-        x = self.dropout(x)
-        x = x * self.scale
-        x = F.linear(x, self.wenc, self.benc)
-        x = nn.ReLU()(x)
-        x = self.dropout2(x)
-        x = F.linear(x, self.wdec, self.bdec)
-        return x
+    def forward(self, vec_x):
+        x_u, x_v = vec_x
+        x_u = F.linear(x_u, self.w_u, self.b_u)
+        x_v = F.linear(x_v, self.w_v, self.b_v).T
+        x_u = x_u.expand(-1, x_v.size(1))
+        x_v = x_v.expand(x_u.size(0), -1)
+        return x_u, x_v
 
     def get_reg_loss(self):
         return self.args.reg * (
-            torch.norm(self.wenc) ** 2
-            + torch.norm(self.wdec) ** 2
+            torch.norm(self.w_u) ** 2 +
+            torch.norm(self.w_v) ** 2
         )
 
 class FiLMlayer(torch.nn.Module):

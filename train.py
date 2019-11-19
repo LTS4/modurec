@@ -83,8 +83,8 @@ def train_recom_net(recom_data, args):
 def train_gae_net(recom_data, args):
     # Create masks
     non_zero = np.where(recom_data.rating_matrix != 0)
-    train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2, random_state=1)
-    val_inds, test_inds = train_test_split(val_inds, test_size=0.5, random_state=1)
+    train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2)
+    val_inds, test_inds = train_test_split(val_inds, test_size=0.5)
     if args.testing:
         train_inds = np.concatenate([train_inds, val_inds])
         val_inds = test_inds.copy()
