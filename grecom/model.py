@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from grecom.data_utils import input_unseen_uv
-from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder, TimeNN
+from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
+import numpy as np
 
 
 class RecomNet(torch.nn.Module):
@@ -34,18 +35,31 @@ class GAENet(torch.nn.Module):
 
     def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
+        self.time_matrix = torch.tensor(
+                recom_data.time_matrix[..., :3], dtype=torch.float
+            ).to(args.device)
+        self.features_u = torch.tensor(np.stack(recom_data.users.features.values), dtype=torch.float).to(args.device)
+        self.features_v = torch.tensor(np.stack(recom_data.items.features.values), dtype=torch.float).to(args.device)
 
-        self.time_matrix = torch.tensor(recom_data.time_matrix[...,:3], dtype=torch.float).to(args.device)
         if args.no_time:
-            self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size)
-            self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size)
+            time_matrix_u, time_matrix_v = None, None
         else:
-            self.item_ae = GraphAutoencoder(recom_data.n_users, args, emb_size, self.time_matrix.transpose(0, 1), time_ndim=0)
-            self.user_ae = GraphAutoencoder(recom_data.n_items, args, emb_size, self.time_matrix, time_ndim=0)
+            time_matrix_u = self.time_matrix
+            time_matrix_v = time_matrix_u.transpose(0, 1)
+        if args.no_features:
+            ft_matrices_u, ft_matrices_v = None, None
+        else:
+            ft_matrices_u = (self.features_u, self.features_v)
+            ft_matrices_v = (self.features_v, self.features_u)
+
+        self.item_ae = GraphAutoencoder(
+            recom_data.n_users, args, emb_size, time_matrix_v, ft_matrices_v)
+        self.user_ae = GraphAutoencoder(
+            recom_data.n_items, args, emb_size, time_matrix_u, ft_matrices_u)
 
         train_mask = torch.tensor(train_mask).to(args.device)
         val_mask = torch.tensor(val_mask).to(args.device)
-        
+
         x = torch.tensor(recom_data.rating_matrix).to(args.device)
         self.x_train = (x * train_mask)
         self.x_val = (x * val_mask)

@@ -109,29 +109,27 @@ class GraphConv1D(MessagePassing):
 
 
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, input_size, args, emb_size=500, time_matrix=None, time_ndim=0):
+    def __init__(self, input_size, args, emb_size=500,
+                 time_matrix=None, feature_matrices=None):
         super(GraphAutoencoder, self).__init__()
 
         self.time_matrix = time_matrix
-        self.time_mult = None
-        self.time_add = None
-        self.time_ndim = time_ndim
+        self.feature_matrices = feature_matrices
         self.rating_add = Parameter(torch.FloatTensor(1).to(args.device))
         if time_matrix is not None:
             self.time_model = TimeNN(args, n_time_inputs=time_matrix.shape[-1])
-            if time_ndim == 0:
-                self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
-                self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))
-            elif time_ndim == 1:
-                self.time_mult = Parameter(torch.FloatTensor(input_size).to(args.device))
-                self.time_add = Parameter(torch.FloatTensor(input_size).to(args.device))
-            elif time_ndim == 2:
-                self.time_mult = Parameter(torch.zeros_like(time_matrix[:,:,0]).to(args.device))
-                self.time_add = Parameter(torch.zeros_like(time_matrix[:,:,0]).to(args.device))
+            self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
+            self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))
+        if feature_matrices is not None:
+            ft_sizes = [x.size(1) for x in feature_matrices]
+            self.ft_model = FeatureNN(args, ft_sizes)
+            self.ft1_add = Parameter(torch.FloatTensor(1).to(args.device))
+            self.ft1_mult = Parameter(torch.FloatTensor(1).to(args.device))
+            self.ft2_add = Parameter(torch.FloatTensor(1).to(args.device))
+            self.ft2_mult = Parameter(torch.FloatTensor(1).to(args.device))
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
         self.conv = GraphConv0D(args).to(args.device)
-        #self.conv = GraphConv1D(emb_size, args).to(args.device)
         self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
         self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
 
@@ -152,14 +150,35 @@ class GraphAutoencoder(torch.nn.Module):
             init.uniform_(b, -bound, bound)
         init.normal_(self.conv.weight, std=.01)
         init.zeros_(self.rating_add)
-        if self.time_mult is not None:
+        if self.time_matrix is not None:
             init.normal_(self.time_mult, std=1e-4)
             init.normal_(self.time_add, std=1e-4)
+        if self.feature_matrices is not None:
+            init.normal_(self.ft1_mult, std=1e-4)
+            init.normal_(self.ft1_add, std=1e-4)
+            init.normal_(self.ft2_mult, std=1e-4)
+            init.normal_(self.ft2_add, std=1e-4)
 
     def forward(self, x, edge_index, edge_weight=None):
+        if (self.time_matrix, self.feature_matrices) is not (None, None):
+            x0 = x.clone()
+            x = x0 * self.rating_add
         if self.time_matrix is not None:
             time_comp = self.time_model(self.time_matrix)
-            x = (x * time_comp * self.time_mult) + time_comp * self.time_add * (x > 0) + x * self.rating_add
+            x += (
+                x0 * time_comp * self.time_mult +
+                time_comp * self.time_add * (x0 > 0)
+            )
+        if self.feature_matrices is not None:
+            fts_1, fts_2 = self.ft_model(self.feature_matrices)
+            x += (
+                x0 * fts_1 * self.ft1_mult +
+                fts_1 * self.ft1_add * (x0 > 0)
+            )
+            x += (
+                x0 * fts_2 * self.ft2_mult +
+                fts_2 * self.ft2_add * (x0 > 0)
+            )
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
@@ -175,6 +194,8 @@ class GraphAutoencoder(torch.nn.Module):
         )
         if self.time_matrix is not None:
             reg_loss += self.time_model.get_reg_loss()
+        if self.feature_matrices is not None:
+            reg_loss += self.ft_model.get_reg_loss()
         return reg_loss
 
 
@@ -206,3 +227,34 @@ class TimeNN(torch.nn.Module):
     
     def __repr__(self):
         return f"w_aff: {self.w_aff}, b_aff:{self.b_aff}, w_comb:{self.w_comb}"
+
+class FeatureNN(torch.nn.Module):
+    def __init__(self, args, ft_sizes, emb_size=500):
+        super(FeatureNN, self).__init__()
+        self.w_u = Parameter(torch.FloatTensor(1, ft_sizes[0]).to(args.device))
+        self.b_u = Parameter(torch.FloatTensor(1).to(args.device))
+        self.w_v = Parameter(torch.FloatTensor(1, ft_sizes[1]).to(args.device))
+        self.b_v = Parameter(torch.FloatTensor(1).to(args.device))
+
+        self.args = args
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.xavier_normal_(self.w_u)
+        init.zeros_(self.b_u)
+        init.xavier_normal_(self.w_v)
+        init.zeros_(self.b_v)
+
+    def forward(self, vec_x):
+        x_u, x_v = vec_x
+        x_u = F.linear(x_u, self.w_u, self.b_u)
+        x_v = F.linear(x_v, self.w_v, self.b_v).T
+        x_u = x_u.expand(-1, x_v.size(1))
+        x_v = x_v.expand(x_u.size(0), -1)
+        return x_u, x_v
+
+    def get_reg_loss(self):
+        return self.args.reg * (
+            torch.norm(self.w_u) ** 2 +
+            torch.norm(self.w_v) ** 2
+        )

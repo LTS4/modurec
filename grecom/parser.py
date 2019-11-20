@@ -36,6 +36,7 @@ def parser_recommender():
     parser.add_argument('--model', type=str, help='model',
                         choices=['hetero_gcmc', 'gautorec'])
     parser.add_argument('--no-time', action='store_true', default=False)
+    parser.add_argument('--no-features', action='store_true', default=False)
     parser.add_argument('--reg', type=float, default=0.001,
                         help='regularization parameter')
     common_parser(parser)
