@@ -32,11 +32,14 @@ def common_parser(parser):
 def parser_recommender():
     parser = argparse.ArgumentParser(description='PyTorch Recommender System')
     parser.add_argument('--dataset', type=str, help='dataset',
-                        choices=['ml-100k', 'ml-1m', 'ml-10m', 'ml-20m'])
+                        choices=[
+                            'ml-100k', 'ml-1m', 'ml-10m', 'ml-20m',
+                            'douban', 'flixster', 'yahoo_music'])
     parser.add_argument('--model', type=str, help='model',
                         choices=['hetero_gcmc', 'gautorec'])
     parser.add_argument('--no-time', action='store_true', default=False)
     parser.add_argument('--no-features', action='store_true', default=False)
+    parser.add_argument('--no-conv', action='store_true', default=False)
     parser.add_argument('--reg', type=float, default=0.001,
                         help='regularization parameter')
     common_parser(parser)

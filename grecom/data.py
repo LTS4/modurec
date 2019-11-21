@@ -16,6 +16,7 @@ from torch_geometric.data import download_url, extract_zip, Data
 from torch_geometric.utils import to_undirected, subgraph
 import torch
 
+from grecom.utils import load_matlab_file
 
 class RecommenderDataset(object):
     def __init__(self, args):
@@ -43,7 +44,7 @@ class RecommenderDataset(object):
         self.ratings = self.create_dataframe_ratings()
         self.create_global_indices()
 
-        if args.dataset not in ('ml-10m', 'ml-20m'):
+        if args.dataset not in ('ml-10m', 'ml-20m', 'douban'):
             self.rating_graph = self.create_rating_graph()
 
             # Create user and item similarity graphs
@@ -52,6 +53,12 @@ class RecommenderDataset(object):
             self.similar_graph = self.create_similar_graph()
 
         self.rating_matrix, self.time_matrix = self.create_rating_matrices()
+
+        if args.dataset in ('douban'):
+            self.n_users, self.n_items = self.rating_matrix.shape
+            file_path = os.path.join(self.raw_dir, 'training_test_dataset.mat')
+            self.train_mask = load_matlab_file(file_path, 'Otraining')
+            self.test_mask = load_matlab_file(file_path, 'Otest')
 
     def select_url(self):
         return {
@@ -71,6 +78,8 @@ class RecommenderDataset(object):
                 self.args.raw_path + '/ml-10m')
 
     def create_global_indices(self):
+        if self.ratings is None:
+            return None
         user_ids = np.unique(np.concatenate(
             [self.ratings.user_id.unique(), self.users.user_id.unique()]))
         item_ids = np.unique(np.concatenate(
@@ -175,6 +184,8 @@ class RecommenderDataset(object):
             return self.preprocess_item_features_ml10m()
         elif self.args.dataset == 'ml-20m':
             return self.preprocess_item_features_ml20m()
+        else:
+            return pd.DataFrame(columns=['item_id'])
 
     def preprocess_item_features_ml100k(self):
         movie_headers = ['id', 'title', 'rel_date', 'video release date',
@@ -291,6 +302,8 @@ class RecommenderDataset(object):
             return self.create_dataframe_ratings_ml10m()
         elif self.args.dataset == 'ml-20m':
             return self.create_dataframe_ratings_ml20m()
+        else:
+            return None
 
     def create_dataframe_ratings_ml100k(self):
         cols = ['user_id', 'item_id', 'rating', 'timestamp']
@@ -437,6 +450,9 @@ class RecommenderDataset(object):
                 [self.dict_user_ra[x.item()] for x in new_user_ids])]
 
     def create_rating_matrices(self):
+        if self.args.dataset in ('douban'):
+            file_path = os.path.join(self.raw_dir, 'training_test_dataset.mat')
+            return load_matlab_file(file_path, 'M'), None
         y = torch.tensor(self.ratings.rating.values, dtype=torch.float)
         user_ids = self.ratings.user_id.map(self.dict_user_ar)
         item_ids = self.ratings.item_id.map(self.dict_item_ar)

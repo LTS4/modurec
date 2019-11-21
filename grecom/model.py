@@ -35,20 +35,20 @@ class GAENet(torch.nn.Module):
 
     def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
         super(GAENet, self).__init__()
-        self.time_matrix = torch.tensor(
-                recom_data.time_matrix[..., :3], dtype=torch.float
-            ).to(args.device)
-        self.features_u = torch.tensor(np.stack(recom_data.users.features.values), dtype=torch.float).to(args.device)
-        self.features_v = torch.tensor(np.stack(recom_data.items.features.values), dtype=torch.float).to(args.device)
 
         if args.no_time:
             time_matrix_u, time_matrix_v = None, None
         else:
+            self.time_matrix = torch.tensor(
+                recom_data.time_matrix[..., :3], dtype=torch.float
+            ).to(args.device)
             time_matrix_u = self.time_matrix
             time_matrix_v = time_matrix_u.transpose(0, 1)
         if args.no_features:
             ft_matrices_u, ft_matrices_v = None, None
         else:
+            self.features_u = torch.tensor(np.stack(recom_data.users.features.values), dtype=torch.float).to(args.device)
+            self.features_v = torch.tensor(np.stack(recom_data.items.features.values), dtype=torch.float).to(args.device)
             ft_matrices_u = (self.features_u, self.features_v)
             ft_matrices_v = (self.features_v, self.features_u)
 
@@ -66,10 +66,16 @@ class GAENet(torch.nn.Module):
 
         self.mean_rating = self.x_train[self.x_train != 0].mean()
 
-        self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
-        self.edge_index_v = recom_data.item_graph.edge_index.to(args.device) - recom_data.n_users
-        self.edge_weight_u = recom_data.user_graph.edge_weight.to(args.device)
-        self.edge_weight_v = recom_data.item_graph.edge_weight.to(args.device)
+        if args.no_conv:
+            self.edge_index_u = None
+            self.edge_index_v = None
+            self.edge_weight_u = None
+            self.edge_weight_v = None
+        else:
+            self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
+            self.edge_index_v = recom_data.item_graph.edge_index.to(args.device) - recom_data.n_users
+            self.edge_weight_u = recom_data.user_graph.edge_weight.to(args.device)
+            self.edge_weight_v = recom_data.item_graph.edge_weight.to(args.device)
 
         self.args = args
     

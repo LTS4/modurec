@@ -159,7 +159,7 @@ class GraphAutoencoder(torch.nn.Module):
             init.normal_(self.ft2_mult, std=1e-4)
             init.normal_(self.ft2_add, std=1e-4)
 
-    def forward(self, x, edge_index, edge_weight=None):
+    def forward(self, x, edge_index=None, edge_weight=None):
         if (self.time_matrix, self.feature_matrices) is not (None, None):
             x0 = x.clone()
             x = x0 * self.rating_add
@@ -182,7 +182,8 @@ class GraphAutoencoder(torch.nn.Module):
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
-        x = self.conv(x, edge_index, edge_weight)
+        if not self.args.no_conv:
+            x = self.conv(x, edge_index, edge_weight)
         x = self.dropout2(x)
         p = F.linear(x, self.wdec, self.bdec)
         return p

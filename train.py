@@ -97,6 +97,13 @@ def train_gae_net(recom_data, args):
             np.array([recom_data.dict_user_ar[x] for x in test_df.u]),
             np.array([recom_data.dict_item_ar[x] for x in test_df.v]) - recom_data.n_users
         )
+        train_mask = np.zeros_like(recom_data.rating_matrix)
+        train_mask[tuple(train_inds)] = 1
+        val_mask = np.zeros_like(recom_data.rating_matrix)
+        val_mask[tuple(val_inds)] = 1
+    elif args.dataset in ('douban'):
+        train_mask = recom_data.train_mask
+        val_mask = recom_data.test_mask
     else:
         non_zero = np.where(recom_data.rating_matrix != 0)
         train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2)
@@ -106,11 +113,11 @@ def train_gae_net(recom_data, args):
             val_inds = test_inds.copy()
         train_inds = train_inds.T
         val_inds = val_inds.T
+        train_mask = np.zeros_like(recom_data.rating_matrix)
+        train_mask[tuple(train_inds)] = 1
+        val_mask = np.zeros_like(recom_data.rating_matrix)
+        val_mask[tuple(val_inds)] = 1
 
-    train_mask = np.zeros_like(recom_data.rating_matrix)
-    train_mask[tuple(train_inds)] = 1
-    val_mask = np.zeros_like(recom_data.rating_matrix)
-    val_mask[tuple(val_inds)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
