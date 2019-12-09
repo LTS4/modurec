@@ -1,48 +1,110 @@
-import argparse
+from argparse import ArgumentParser
 
 
-def common_parser(parser):
-    parser.add_argument('--experiments', type=int, default=1,
-                        help='Number of experiments to average results on')
-    parser.add_argument('--testing', action='store_true', default=False,
-                        help='trains with train + val')
-    # Learning parameters
-    parser.add_argument('--lr', type=float, default=0.001,
-                        help='learning rate (default: 0.001)')
-    parser.add_argument('--early-stopping', type=int, default=0,
-                        help='Patience -  0 = disable (default: 0)')
-    parser.add_argument('--epochs', type=int, default=100,
-                        help='number of epochs to train (default: 100)')
-    # GPU
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
-    parser.add_argument('--gpu', type=int, default=0, help='id of gpu device')
+def add_experiment_args(parser):
+    """Add parameters related with the experiment
 
-    parser.add_argument('--seed', type=int, default=1,
-                        help='random seed (default: 1)')
-    # Save
-    parser.add_argument('--id', type=str, help='identifier of the experiment')
-    # Paths
-    parser.add_argument('--raw-path', type=str, default='/datasets2/recom_heterograph/raw/')
-    parser.add_argument('--data-path', type=str, default='/datasets2/recom_heterograph/data/')
-    parser.add_argument('--models-path', type=str, default='/datasets2/recom_heterograph/models/')
-    parser.add_argument('--results-path', type=str, default='/datasets2/recom_heterograph/results/')
+    :param parser: Parser object without the experiment parameters
+    :type parser: ArgumentParser
+    """
+    parser.add_argument(
+        '--dataset', required=True, type=str,
+        help='Dataset to run the experiment on')
+    parser.add_argument(
+        '--model', required=True, type=str,
+        help='Model to run in the experiment')
+    parser.add_argument(
+        '--n_runs', type=int, default=1,
+        help='Number of runs to average results on')
+    parser.add_argument(
+        '--preprocess', action='store_true', default=False,
+        help='Preprocess data (even if exists)')
 
 
-def parser_recommender():
-    parser = argparse.ArgumentParser(description='PyTorch Recommender System')
-    parser.add_argument('--dataset', type=str, help='dataset',
-                        choices=[
-                            'ml-100k', 'ml-1m', 'ml-10m', 'ml-20m',
-                            'douban', 'flixster', 'yahoo_music'])
-    parser.add_argument('--model', type=str, help='model',
-                        choices=['hetero_gcmc', 'gautorec'])
-    parser.add_argument('--no-time', action='store_true', default=False)
-    parser.add_argument('--no-features', action='store_true', default=False)
-    parser.add_argument('--no-conv', action='store_true', default=False)
-    parser.add_argument('--reg', type=float, default=0.001,
-                        help='regularization parameter')
-    common_parser(parser)
-    # Parse the arguments
+def add_splitting_args(parser):
+    parser.add_argument(
+        '--split_type', required=True, type=str,
+        choices=['predefined', 'random'],
+        help='Splitting scenario')
+    parser.add_argument(
+        '--split_id', type=int, default=1,
+        help='Which split to choose (seed used if not predefined scenario)')
+    parser.add_argument(
+        '--same_split', action='store_true', default=False,
+        help='Use the same split across experiments')
+    parser.add_argument(
+        '--train_prop', type=float, default=0.9,
+        help='Proportion used to train. Not valid for predefined scenario.')
+
+
+def add_hardware_args(parser):
+    """Add parameters related with the hardware
+
+    :param parser: Parser object without the hardware parameters
+    :type parser: ArgumentParser
+    """
+    parser.add_argument(
+        '--no-cuda', action='store_true', default=False,
+        help='Disables CUDA training')
+    parser.add_argument(
+        '--gpu', type=int, default=0,
+        help='Id of gpu device')
+    parser.add_argument(
+        '--n_cores', type=int, default=-1,
+        help='Number of cpu cores')
+    parser.add_argument(
+        '--torch_seed', type=int, default=0,
+        help='Pytorch seed')
+
+
+def add_hyperparameters(parser):
+    """Add parameters related with training
+
+    :param parser: Parser object without the hyperparameters
+    :type parser: ArgumentParser
+    """
+    parser.add_argument(
+        '--lr', type=float, default=0.001,
+        help='Learning rate (default: 0.001)')
+    parser.add_argument(
+        '--epochs', type=int, default=100,
+        help='Number of epochs to train (default: 100)')
+    parser.add_argument(
+        '--reg', type=float, default=0.001,
+        help='General regularization parameter')
+
+
+def add_path_args(parser):
+    """Add parameters related with paths
+
+    :param parser: Parser object without the paths
+    :type parser: ArgumentParser
+    """
+    parser.add_argument(
+        '--raw-path', type=str, default='raw/',
+        help='Path for the raw data')
+    parser.add_argument(
+        '--data-path', type=str, default='data/',
+        help='Path for the processed data')
+    parser.add_argument(
+        '--models-path', type=str, default='models/',
+        help='Path for the models')
+    parser.add_argument(
+        '--results-path', type=str, default='results/',
+        help='Path for the results')
+
+
+def parse_inputs():
+    """Parse all input arguments from command line
+
+    :return: parsed parameters
+    :rtype: dict
+    """
+    parser = ArgumentParser(description='Autorec++')
+    add_experiment_args(parser)
+    add_splitting_args(parser)
+    add_hardware_args(parser)
+    add_hyperparameters(parser)
+    add_path_args(parser)
     args = parser.parse_args()
     return args

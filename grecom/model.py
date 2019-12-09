@@ -1,106 +1,39 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from grecom.data_utils import input_unseen_uv
-from grecom.layers import RecomConv, BilinearDecoder, GraphAutoencoder
-import numpy as np
+from grecom.layers import TimeNN, FilmLayer
 
 
-class RecomNet(torch.nn.Module):
-    def __init__(self, edge_sim, edge_rat, x, ratings, args):
-        super(RecomNet, self).__init__()
-        self.edge_sim = edge_sim
-        self.edge_rat = edge_rat
-        self.x = x
-        self.ratings = ratings
-
-        self.conv1 = RecomConv(x.shape[0], 200, args)
-        self.conv2 = RecomConv(200, 200, args)
-        self.decoder = BilinearDecoder(200, ratings.rating.mean(), args)
-
-    def forward(self, mask):
-        x = self.conv1(self.edge_sim, self.edge_rat, self.x)
-        x = F.relu(x)
-        x = self.conv2(self.edge_sim, self.edge_rat, x)
-        h1 = x[self.edge_rat[0]]
-        h2 = x[self.edge_rat[1]]
-        pred = self.decoder(h1[mask], h2[mask])
-        return pred
-
-
-class GAENet(torch.nn.Module):
-    """Graph Autoencoder Network
-    """
-
-    def __init__(self, recom_data, train_mask, val_mask, args, emb_size=500):
-        super(GAENet, self).__init__()
-
-        if args.no_time:
-            time_matrix_u, time_matrix_v = None, None
-        else:
-            self.time_matrix = torch.tensor(
-                recom_data.time_matrix[..., :3], dtype=torch.float
-            ).to(args.device)
-            time_matrix_u = self.time_matrix
-            time_matrix_v = time_matrix_u.transpose(0, 1)
-        if args.no_features:
-            ft_matrices_u, ft_matrices_v = None, None
-        else:
-            self.features_u = torch.tensor(np.stack(recom_data.users.features.values), dtype=torch.float).to(args.device)
-            self.features_v = torch.tensor(np.stack(recom_data.items.features.values), dtype=torch.float).to(args.device)
-            ft_matrices_u = (self.features_u, self.features_v)
-            ft_matrices_v = (self.features_v, self.features_u)
-
-        self.item_ae = GraphAutoencoder(
-            recom_data.n_users, args, emb_size, time_matrix_v, ft_matrices_v)
-        self.user_ae = GraphAutoencoder(
-            recom_data.n_items, args, emb_size, time_matrix_u, ft_matrices_u)
-
-        train_mask = torch.tensor(train_mask).to(args.device)
-        val_mask = torch.tensor(val_mask).to(args.device)
-
-        x = torch.tensor(recom_data.rating_matrix).to(args.device)
-        self.x_train = (x * train_mask)
-        self.x_val = (x * val_mask)
-
-        self.mean_rating = self.x_train[self.x_train != 0].mean()
-
-        if args.no_conv:
-            self.edge_index_u = None
-            self.edge_index_v = None
-            self.edge_weight_u = None
-            self.edge_weight_v = None
-        else:
-            self.edge_index_u = recom_data.user_graph.edge_index.to(args.device)
-            self.edge_index_v = recom_data.item_graph.edge_index.to(args.device) - recom_data.n_users
-            self.edge_weight_u = recom_data.user_graph.edge_weight.to(args.device)
-            self.edge_weight_v = recom_data.item_graph.edge_weight.to(args.device)
-
+class AutorecPP(nn.Module):
+    def __init__(self, args, input_size, rating_range=(1, 5)):
+        super(AutorecPP, self).__init__()
+        self.requires_time = True
         self.args = args
-    
-    def forward(self, train='user', is_val=False):
-        """mask: size 2*E
-        """
-        # Create input features
-        x = self.x_train
-        if is_val:
-            p_u = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
-            p_v = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v)
-            p_u = nn.Hardtanh(1, 5)(p_u)
-            p_v = nn.Hardtanh(1, 5)(p_v.T)
-            p_u = input_unseen_uv(self.x_train, self.x_val, p_u, self.mean_rating)
-            p_v = input_unseen_uv(self.x_train, self.x_val, p_v, self.mean_rating)
-            pred = (p_u + p_v) / 2
-            return pred, p_u, p_v
-        else:
-            if train == 'user':
-                pred = self.user_ae(x, self.edge_index_u, self.edge_weight_u)
-                reg_loss = self.user_ae.get_reg_loss()
-            elif train == 'item':
-                pred = self.item_ae(x.T, self.edge_index_v, self.edge_weight_v).T
-                reg_loss = self.item_ae.get_reg_loss()
-            else:
-                raise ValueError
-            return self.x_train, pred, reg_loss
+        
+        self.time_nn = TimeNN(args, n_time_inputs=3)
+        self.film_time = FilmLayer(args)
+        self.dropout_input = nn.Dropout(0.7)
+        self.encoder = nn.Linear(input_size, 500)
+        self.dropout_emb = nn.Dropout(0.5)
+        self.decoder = nn.Linear(500, input_size)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
+    def forward(self, x, time_x):
+        time_x = self.time_nn(time_x)
+        x = self.film_time(x, time_x)
+        x = self.dropout_input(x)
+        h = self.encoder(x)
+        x = self.dropout_emb(h)
+        p = self.decoder(x)
+        if not self.training:
+            p = self.limiter(p)
+        return p
+
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        reg_loss += self.time_nn.get_reg_loss()
+        return reg_loss
+     
