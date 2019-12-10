@@ -106,8 +106,8 @@ def train_gae_net(recom_data, args):
         val_mask = recom_data.test_mask
     else:
         non_zero = np.where(recom_data.rating_matrix != 0)
-        train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2)
-        val_inds, test_inds = train_test_split(val_inds, test_size=0.5)
+        train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2, random_state=1)
+        val_inds, test_inds = train_test_split(val_inds, test_size=0.5, random_state=1)
         if args.testing:
             train_inds = np.concatenate([train_inds, val_inds])
             val_inds = test_inds.copy()
@@ -180,6 +180,8 @@ def train_gae_net(recom_data, args):
     print(min_val)
     print("U|", model.user_ae.time_model, "time_m|a|r:", model.user_ae.time_mult.item(),'|', model.user_ae.time_add.item(), '|', model.user_ae.rating_add.item())
     print("V|", model.item_ae.time_model, "time_m|a|r:", model.item_ae.time_mult.item(),'|', model.item_ae.time_add.item(), '|', model.item_ae.rating_add.item())
+    print(f"Feature params: (U):{model.user_ae.ft1_mult.item():.5f}, {model.user_ae.ft2_mult.item():.5f}, {model.user_ae.ft_bias.item():.5f}")
+    print(f"Feature params: (V):{model.item_ae.ft1_mult.item():.5f}, {model.item_ae.ft2_mult.item():.5f}, {model.item_ae.ft_bias.item():.5f}")
     return model, results
 
 
