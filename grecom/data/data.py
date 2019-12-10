@@ -26,6 +26,9 @@ def split_data(args):
         data_module = import_module(f"grecom.data.{args.dataset}")
         getattr(data_module, 'split_predefined')(args)
     elif args.split_type == 'random':
+        save_path = os.path.join(args.split_path, str(args.split_id))
+        if os.path.exists(save_path):
+            return
         with h5py.File(os.path.join(args.data_path, "data.h5"), "r") as f:
             row = f['cf_data']['row'][:]
         _, test_inds = train_test_split(
@@ -33,7 +36,6 @@ def split_data(args):
             random_state=args.split_id)
         train_mask = np.ones(len(row))
         train_mask[test_inds] = 0
-        save_path = os.path.join(args.split_path, str(args.split_id))
         os.makedirs(save_path)
         with h5py.File(os.path.join(save_path, "train_mask.h5"), "w") as f:
             f["train_mask"] = train_mask

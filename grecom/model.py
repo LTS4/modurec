@@ -13,9 +13,9 @@ class AutorecPP(nn.Module):
         self.time_nn = TimeNN(args, n_time_inputs=3)
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(0.7)
-        self.encoder = nn.Linear(input_size, 500)
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
         self.dropout_emb = nn.Dropout(0.5)
-        self.decoder = nn.Linear(500, input_size)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
     def forward(self, x, time_x):

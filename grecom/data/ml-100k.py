@@ -266,7 +266,6 @@ def split_predefined(args):
     save_path = os.path.join(args.split_path, str(args.split_id))
     if os.path.exists(save_path):
         return
-    os.makedirs(save_path)
     raw_path = os.path.join(args.raw_path, DATASET)
     colnames = ['u', 'v', 'r', 't']
     df_test = pd.read_csv(
@@ -292,5 +291,6 @@ def split_predefined(args):
             train_mask[i] = 0
             if j == len(test_inds):
                 break
+    os.makedirs(save_path)
     with h5py.File(os.path.join(save_path, "train_mask.h5"), "w") as f:
         f["train_mask"] = train_mask
