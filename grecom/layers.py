@@ -123,10 +123,9 @@ class GraphAutoencoder(torch.nn.Module):
         if feature_matrices is not None:
             ft_sizes = [x.size(1) for x in feature_matrices]
             self.ft_model = FeatureNN(args, ft_sizes)
-            self.ft1_add = Parameter(torch.FloatTensor(1).to(args.device))
             self.ft1_mult = Parameter(torch.FloatTensor(1).to(args.device))
-            self.ft2_add = Parameter(torch.FloatTensor(1).to(args.device))
             self.ft2_mult = Parameter(torch.FloatTensor(1).to(args.device))
+            self.ft_bias = Parameter(torch.FloatTensor(1).to(args.device))
         self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
         self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
         self.conv = GraphConv0D(args).to(args.device)
@@ -155,30 +154,28 @@ class GraphAutoencoder(torch.nn.Module):
             init.normal_(self.time_add, std=1e-4)
         if self.feature_matrices is not None:
             init.normal_(self.ft1_mult, std=1e-4)
-            init.normal_(self.ft1_add, std=1e-4)
             init.normal_(self.ft2_mult, std=1e-4)
-            init.normal_(self.ft2_add, std=1e-4)
+            init.zeros_(self.ft_bias, std=1e-4)
 
     def forward(self, x, edge_index=None, edge_weight=None):
-        if (self.time_matrix, self.feature_matrices) is not (None, None):
+        if self.time_matrix is not None:
             x0 = x.clone()
             x = x0 * self.rating_add
-        if self.time_matrix is not None:
             time_comp = self.time_model(self.time_matrix)
             x += (
                 x0 * time_comp * self.time_mult +
                 time_comp * self.time_add * (x0 > 0)
             )
         if self.feature_matrices is not None:
-            fts_1, fts_2 = self.ft_model(self.feature_matrices)
-            x += (
-                x0 * fts_1 * self.ft1_mult +
-                fts_1 * self.ft1_add * (x0 > 0)
+            fts = self.ft_model(self.feature_matrices)
+            obs = (x != 0)
+            A = F.sigmoid(
+                self.ft1_mult * obs.sum(0).expand(x.size(0), -1) +
+                self.ft2_mult * obs.sum(1).expand(-1, x.size(1)) +
+                self.bias
             )
-            x += (
-                x0 * fts_2 * self.ft2_mult +
-                fts_2 * self.ft2_add * (x0 > 0)
-            )
+            A[obs.sum(0) == 0, obs.sum(1) == 0] = 0
+            x = x * A + fts * (1 - A)
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
         x = nn.Sigmoid()(x)
@@ -229,33 +226,25 @@ class TimeNN(torch.nn.Module):
     def __repr__(self):
         return f"w_aff: {self.w_aff}, b_aff:{self.b_aff}, w_comb:{self.w_comb}"
 
+
 class FeatureNN(torch.nn.Module):
     def __init__(self, args, ft_sizes, emb_size=500):
         super(FeatureNN, self).__init__()
-        self.w_u = Parameter(torch.FloatTensor(1, ft_sizes[0]).to(args.device))
-        self.b_u = Parameter(torch.FloatTensor(1).to(args.device))
-        self.w_v = Parameter(torch.FloatTensor(1, ft_sizes[1]).to(args.device))
-        self.b_v = Parameter(torch.FloatTensor(1).to(args.device))
+        self.w_bilinear = Parameter(torch.FloatTensor(ft_sizes[0], ft_sizes[1]).to(args.device))
+        self.bias = Parameter(torch.FloatTensor(1).to(args.device))
 
         self.args = args
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.xavier_normal_(self.w_u)
-        init.zeros_(self.b_u)
-        init.xavier_normal_(self.w_v)
-        init.zeros_(self.b_v)
+        init.xavier_normal_(self.w_bilinear)
+        init.zeros_(self.bias)
 
     def forward(self, vec_x):
         x_u, x_v = vec_x
-        x_u = F.linear(x_u, self.w_u, self.b_u)
-        x_v = F.linear(x_v, self.w_v, self.b_v).T
-        x_u = x_u.expand(-1, x_v.size(1))
-        x_v = x_v.expand(x_u.size(0), -1)
-        return x_u, x_v
+        return x_u * self.w_bilinear * x_v.T + self.bias
 
     def get_reg_loss(self):
         return self.args.reg * (
-            torch.norm(self.w_u) ** 2 +
-            torch.norm(self.w_v) ** 2
+            torch.norm(self.w_bilinear) ** 2
         )
