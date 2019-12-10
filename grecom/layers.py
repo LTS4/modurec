@@ -155,7 +155,7 @@ class GraphAutoencoder(torch.nn.Module):
         if self.feature_matrices is not None:
             init.normal_(self.ft1_mult, std=1e-4)
             init.normal_(self.ft2_mult, std=1e-4)
-            init.zeros_(self.ft_bias, std=1e-4)
+            init.zeros_(self.ft_bias)
 
     def forward(self, x, edge_index=None, edge_weight=None):
         if self.time_matrix is not None:
@@ -169,12 +169,15 @@ class GraphAutoencoder(torch.nn.Module):
         if self.feature_matrices is not None:
             fts = self.ft_model(self.feature_matrices)
             obs = (x != 0)
-            A = F.sigmoid(
-                self.ft1_mult * obs.sum(0).expand(x.size(0), -1) +
-                self.ft2_mult * obs.sum(1).expand(-1, x.size(1)) +
-                self.bias
+            A = torch.sigmoid(
+                self.ft2_mult * obs.sum(0, keepdim=True).expand(x.size(0), -1) +
+                self.ft1_mult * obs.sum(1, keepdim=True).expand(-1, x.size(1)) +
+                self.ft_bias
             )
-            A[obs.sum(0) == 0, obs.sum(1) == 0] = 0
+            A_zeros = torch.ones_like(A)
+            A_zeros[obs.sum(1) == 0, :] = 0
+            A_zeros[:, obs.sum(0) == 0] = 0
+            A = A * A_zeros            
             x = x * A + fts * (1 - A)
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
@@ -242,7 +245,7 @@ class FeatureNN(torch.nn.Module):
 
     def forward(self, vec_x):
         x_u, x_v = vec_x
-        return x_u * self.w_bilinear * x_v.T + self.bias
+        return x_u @ self.w_bilinear @ x_v.T + self.bias
 
     def get_reg_loss(self):
         return self.args.reg * (
