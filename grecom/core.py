@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from scipy.sparse import coo_matrix
 from torch import optim, tensor
 from tqdm import tqdm
-from sklearn.metrics import mean_squared_error as mse
 import pandas as pd
 
 from grecom.data import split_data
@@ -41,16 +40,15 @@ def _load_model_data(args, rating_type):
 
 
 class DataGenerator():
-    def __init__(self, data, use_time=False, batch_size=None, max_mem=1e9):
+    def __init__(self, data, args, use_time=False, max_mem=1e9):
         self.use_time = use_time
-        self.batch_size = batch_size
+        self.args = args
+        self.batch_size = max_mem // data['input_size']
         self.data = data
         self.data_dense = None
-        if batch_size is None:
-            self.batch_size = max_mem // data['input_size']
         if self.batch_size > data['epoch_size']:
             self.data_dense = self.load_all_data()
-    
+
     def load_all_data(self):
         dd_index = (self.data['row'], self.data['col'])
         dd_shape = (self.data['epoch_size'], self.data['input_size'])
@@ -70,44 +68,44 @@ class DataGenerator():
         dd['train_mask'] = coo_matrix(
             (np.ones_like(dd_mask[0]), dd_mask),
             shape=dd_shape, dtype=np.float32).toarray()
+        for key, value in dd.items():
+            dd[key] = tensor(value).to(self.args.device)
         return dd
-    
+
     def next(self):
         if self.data_dense is not None:
             return self.data_dense
 
 
-def _register_epoch_rmse(dd, pred, epoch, reg):
+def _get_training_pred(args, dd, model):
+    x_tr = dd['x'] * dd['train_mask']
+    pred = model(x_tr)
+    if model.requires_time:
+        x_time = dd['time'] * dd['train_mask'].unsqueeze(-1)
+        pred = model(x_tr, x_time)
+    return pred
+
+
+def train_val_batch(args, dd, model, epoch, reg):
+    model.train()
+    p = _get_training_pred(args, dd, model)
+    x_tr = dd['x'] * dd['train_mask']
+    loss = (
+        F.mse_loss(x_tr[x_tr != 0], p[x_tr != 0])
+        + model.get_reg_loss())
+    loss.backward()
+
+    model.eval()
     if reg is None:
         reg = pd.DataFrame({'epoch': [], 'tr_rmse': [], 'te_rmse': []})
-    x_tr = dd['x'] * dd['train_mask']
+    p = _get_training_pred(args, dd, model)
     x_te = dd['x'] * (1 - dd['train_mask'])
     reg = reg.append({
         'epoch': epoch,
-        'tr_rmse': mse(x_tr[x_tr != 0], pred[x_tr != 0]) ** (1/2),
-        'te_rmse': mse(x_te[x_te != 0], pred[x_te != 0]) ** (1/2)
+        'tr_rmse': F.mse_loss(x_tr[x_tr != 0], p[x_tr != 0]).item() ** (1/2),
+        'te_rmse': F.mse_loss(x_te[x_te != 0], p[x_te != 0]).item() ** (1/2)
     }, ignore_index=True)
     return reg
-
-
-def _get_train_tensors(args, dd, use_time):
-    x = tensor(dd['x'] * dd['train_mask']).to(args.device)
-    if use_time:
-        x_time = tensor(dd['time'] * np.expand_dims(dd['train_mask'], -1)).to(args.device)
-        return x, x_time
-    return x,
-
-
-def train_one_epoch(args, dd, model):
-    model_args = _get_train_tensors(args, dd, model.requires_time)
-    pred = model(*model_args)
-    real = model_args[0]
-    loss = (
-        F.mse_loss(real[real != 0], pred[real != 0])
-        + model.get_reg_loss())
-    loss.backward()
-    del model_args
-    return pred.detach().numpy()
 
 
 def train(args):
@@ -115,21 +113,18 @@ def train(args):
     data = _load_model_data(args, rating_type)
     model_module = import_module(f"grecom.model")
     model = getattr(model_module, model_str)(args, data['input_size'])
-    data_gen = DataGenerator(data, model.requires_time)
+    data_gen = DataGenerator(data, args, model.requires_time)
     dd = data_gen.next()
     reg = None
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     ex = ThreadPoolExecutor()
-    model.train()
     for epoch in tqdm(range(args.epochs)):
         optimizer.zero_grad()
-        th_model = ex.submit(train_one_epoch, *(args, dd, model))
+        th_model = ex.submit(train_val_batch, *(args, dd, model, epoch, reg))
         th_data = ex.submit(data_gen.next)
-        th_eval = ex.submit(
-            _register_epoch_rmse, *(dd, th_model.result(), epoch, reg))
+        reg = th_model.result()
         dd = th_data.result()
-        reg = th_eval.result()
         optimizer.step()
         scheduler.step()
     print(reg)
