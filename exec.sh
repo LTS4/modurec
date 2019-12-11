@@ -1,4 +1,4 @@
-for i in {1..5}
+for i in {1..1}
 do
     python train.py \
     --data-path data --raw-path raw \

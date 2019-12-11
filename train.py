@@ -123,6 +123,20 @@ def train_gae_net(recom_data, args):
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
     min_val = {'u+v':[0,np.inf], 'u':[0,np.inf], 'v':[0,np.inf]}
+    obs = (model.x_train != 0)
+    O_u = obs.sum(0, keepdim=True).expand(model.x_train.size(0), -1).cpu().numpy()
+    O_v = obs.sum(1, keepdim=True).expand(-1, model.x_train.size(1)).cpu().numpy()
+    q_u = np.percentile(O_u, [25,50,75])
+    q_v = np.percentile(O_v, [25,50,75])
+    O_u = torch.tensor(np.searchsorted(q_u, O_u)).to(args.device)
+    O_v = torch.tensor(np.searchsorted(q_v, O_v)).to(args.device)
+    if True:
+        print(q_u)
+        print(q_v)
+        res = np.zeros([4,4])
+        for i in range(4):
+            for j in range(4):
+                res[i,j] = ((O_u == i) & (O_v == j) & (model.x_val != 0)).sum().item()
     for epoch in tqdm(range(args.epochs)):
         t0 = time.time()
         # Training
@@ -150,6 +164,13 @@ def train_gae_net(recom_data, args):
             val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
             if val_loss < min_val['u+v'][1]:
                 min_val['u+v'] = [epoch, val_loss]
+                if True:
+                    res = np.zeros([2, 4, 4])
+                    for i in range(4):
+                        for j in range(4):
+                            mask = (O_u == i) & (O_v == j)
+                            res[0,i,j] = F.mse_loss(real_train[(real_train != 0) & mask], pred[(real_train != 0) & mask]).item() ** (1/2)
+                            res[1,i,j] = F.mse_loss(real_val[(real_val != 0) & mask], pred[(real_val != 0) & mask]).item() ** (1/2)
             results = results.append(
                 {'epoch': epoch,
                  'train_rmse': train_loss,
@@ -178,6 +199,7 @@ def train_gae_net(recom_data, args):
                 ignore_index=True)
         scheduler.step()
     print(min_val)
+    print(res)
     print("U|", model.user_ae.time_model, "time_m|a|r:", model.user_ae.time_mult.item(),'|', model.user_ae.time_add.item(), '|', model.user_ae.rating_add.item())
     print("V|", model.item_ae.time_model, "time_m|a|r:", model.item_ae.time_mult.item(),'|', model.item_ae.time_add.item(), '|', model.item_ae.rating_add.item())
     print(f"Feature params: (U):{model.user_ae.ft1_mult.item():.5f}, {model.user_ae.ft2_mult.item():.5f}, {model.user_ae.ft_bias.item():.5f}")

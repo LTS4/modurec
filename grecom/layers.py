@@ -177,7 +177,8 @@ class GraphAutoencoder(torch.nn.Module):
             A_zeros = torch.ones_like(A)
             A_zeros[obs.sum(1) == 0, :] = 0
             A_zeros[:, obs.sum(0) == 0] = 0
-            A = A * A_zeros            
+            A = A * A_zeros
+            #A = torch.sigmoid(100*self.ft_bias)         
             x = x * A + fts * (1 - A)
         x = self.dropout(x)
         x = F.linear(x, self.wenc, self.benc)
