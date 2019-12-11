@@ -56,14 +56,14 @@ class DataGenerator():
         dd['x'] = coo_matrix(
             (self.data['rating'], dd_index),
             shape=dd_shape, dtype=np.float32).toarray()
-        if not self.use_time:
-            return dd
-        x_time = np.stack([
-            coo_matrix(
-                (value, dd_index), shape=dd_shape, dtype=np.float32).toarray()
-            for value in self.data['time'].values()
-        ])
-        dd['time'] = np.transpose(x_time, (1, 2, 0))
+        if self.use_time:
+            x_time = np.stack([
+                coo_matrix(
+                    (value, dd_index), shape=dd_shape,
+                    dtype=np.float32).toarray()
+                for value in self.data['time'].values()
+            ])
+            dd['time'] = np.transpose(x_time, (1, 2, 0))
         dd_mask = tuple(x[self.data['train_mask'] == 1] for x in dd_index)
         dd['train_mask'] = coo_matrix(
             (np.ones_like(dd_mask[0]), dd_mask),
@@ -79,10 +79,11 @@ class DataGenerator():
 
 def _get_training_pred(args, dd, model):
     x_tr = dd['x'] * dd['train_mask']
-    pred = model(x_tr)
     if model.requires_time:
         x_time = dd['time'] * dd['train_mask'].unsqueeze(-1)
         pred = model(x_tr, x_time)
+        return pred
+    pred = model(x_tr)
     return pred
 
 
@@ -127,7 +128,8 @@ def train(args):
         dd = th_data.result()
         optimizer.step()
         scheduler.step()
-    print(reg)
+    print(reg.tail(20))
+    print(reg.te_rmse.min())
 
 
 def run_experiment(args):

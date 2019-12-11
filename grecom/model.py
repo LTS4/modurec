@@ -4,6 +4,31 @@ import torch.nn as nn
 from grecom.layers import TimeNN, FilmLayer
 
 
+class Autorec(nn.Module):
+    def __init__(self, args, input_size, rating_range=(1, 5)):
+        super(Autorec, self).__init__()
+        self.requires_time = False
+        self.args = args
+        
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
+
+    def forward(self, x):
+        x = self.encoder(x)
+        p = self.decoder(x)
+        if not self.training:
+            p = self.limiter(p)
+        return p
+
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        return reg_loss
+
+
 class AutorecPP(nn.Module):
     def __init__(self, args, input_size, rating_range=(1, 5)):
         super(AutorecPP, self).__init__()
