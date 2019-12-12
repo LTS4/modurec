@@ -11,11 +11,12 @@ class Autorec(nn.Module):
         self.args = args
         
         self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
         self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
     def forward(self, x):
-        x = self.encoder(x)
+        x = self.sig_act(self.encoder(x))
         p = self.decoder(x)
         if not self.training:
             p = self.limiter(p)
@@ -39,6 +40,7 @@ class AutorecPP(nn.Module):
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(0.7)
         self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
         self.dropout_emb = nn.Dropout(0.5)
         self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
@@ -47,8 +49,8 @@ class AutorecPP(nn.Module):
         time_x = self.time_nn(time_x)
         x = self.film_time(x, time_x)
         x = self.dropout_input(x)
-        h = self.encoder(x)
-        x = self.dropout_emb(h)
+        x = self.sig_act(self.encoder(x))
+        x = self.dropout_emb(x)
         p = self.decoder(x)
         if not self.training:
             p = self.limiter(p)
