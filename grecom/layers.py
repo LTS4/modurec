@@ -110,19 +110,19 @@ class GraphConv1D(MessagePassing):
 
 class GraphAutoencoder(torch.nn.Module):
     def __init__(self, input_size, args, emb_size=500,
-                 time_matrix=None, feature_matrices=None):
+                 time_matrix=None, feature_matrix=None):
         super(GraphAutoencoder, self).__init__()
 
         self.time_matrix = time_matrix
-        self.feature_matrices = feature_matrices
+        self.feature_matrix = feature_matrix
         self.rating_add = Parameter(torch.FloatTensor(1).to(args.device))
         if time_matrix is not None:
             self.time_model = TimeNN(args, n_time_inputs=time_matrix.shape[-1])
             self.time_add = Parameter(torch.FloatTensor(1).to(args.device))
             self.time_mult = Parameter(torch.FloatTensor(1).to(args.device))
-        if feature_matrices is not None:
-            ft_sizes = [x.size(1) for x in feature_matrices]
-            self.ft_model = FeatureNN(args, ft_sizes)
+        if feature_matrix is not None:
+            ft_size = feature_matrix.size(1)
+            self.ft_model = FeatureToEmbedding(args, ft_size)
             self.ft1_mult = Parameter(torch.FloatTensor(1).to(args.device))
             self.ft2_mult = Parameter(torch.FloatTensor(1).to(args.device))
             self.ft_bias = Parameter(torch.FloatTensor(1).to(args.device))
@@ -157,7 +157,7 @@ class GraphAutoencoder(torch.nn.Module):
             init.normal_(self.ft2_mult, std=1e-4)
             init.zeros_(self.ft_bias)
 
-    def forward(self, x, edge_index=None, edge_weight=None):
+    def forward(self, x, edge_index=None, edge_weight=None, action='collab'):
         if self.time_matrix is not None:
             x0 = x.clone()
             x = x0 * self.rating_add
@@ -166,8 +166,8 @@ class GraphAutoencoder(torch.nn.Module):
                 x0 * time_comp * self.time_mult +
                 time_comp * self.time_add * (x0 > 0)
             )
-        if self.feature_matrices is not None:
-            fts = self.ft_model(self.feature_matrices)
+        if action != 'collab':
+            h_fts = self.ft_model(self.feature_matrix)
             obs = (x != 0)
             A = torch.sigmoid(
                 self.ft2_mult * obs.sum(0, keepdim=True).expand(x.size(0), -1) +
@@ -251,4 +251,26 @@ class FeatureNN(torch.nn.Module):
     def get_reg_loss(self):
         return self.args.reg * (
             torch.norm(self.w_bilinear) ** 2
+        )
+
+
+class FeatureToEmbedding(torch.nn.Module):
+    def __init__(self, args, ft_size, emb_size=500):
+        super(FeatureToEmbedding, self).__init__()
+        self.weight = Parameter(torch.FloatTensor(ft_size, emb_size).to(args.device))
+        self.bias = Parameter(torch.FloatTensor(emb_size).to(args.device))
+
+        self.args = args
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.xavier_normal_(self.weight)
+        init.zeros_(self.bias)
+
+    def forward(self, x):
+        return x @ self.weight + self.bias
+
+    def get_reg_loss(self):
+        return self.args.reg * (
+            torch.norm(self.weight) ** 2
         )
