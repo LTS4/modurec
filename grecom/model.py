@@ -5,11 +5,13 @@ from grecom.layers import TimeNN, FilmLayer
 
 
 class Autorec(nn.Module):
+    requires_time = False
+    requires_fts = False
+
     def __init__(self, args, input_size, rating_range=(1, 5)):
         super(Autorec, self).__init__()
-        self.requires_time = False
         self.args = args
-        
+
         self.encoder = nn.Linear(input_size, 500).to(args.device)
         self.sig_act = nn.Sigmoid()
         self.decoder = nn.Linear(500, input_size).to(args.device)
@@ -31,11 +33,13 @@ class Autorec(nn.Module):
 
 
 class AutorecPP(nn.Module):
+    requires_time = True
+    requires_fts = False
+
     def __init__(self, args, input_size, rating_range=(1, 5)):
         super(AutorecPP, self).__init__()
-        self.requires_time = True
         self.args = args
-        
+
         self.time_nn = TimeNN(args, n_time_inputs=3)
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(0.7)
@@ -63,4 +67,79 @@ class AutorecPP(nn.Module):
         )
         reg_loss += self.time_nn.get_reg_loss()
         return reg_loss
-     
+
+
+class AutorecPPP(nn.Module):
+    requires_time = True
+    requires_fts = True
+    tr_steps = 3
+
+    def __init__(self, args, input_size, ft_size, rating_range=(1, 5)):
+        super(AutorecPP, self).__init__()
+        self.args = args
+
+        self.time_nn = TimeNN(args, n_time_inputs=3)
+        self.film_time = FilmLayer(args)
+        self.dropout_input = nn.Dropout(0.7)
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
+        self.dropout_emb = nn.Dropout(0.5)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
+
+        self.ft_encoder = nn.Linear(ft_size, 500).to(args.device)
+        self.add_ft
+
+    def forward(self, x, time_x, ft_x, ft_n):
+        time_x = self.time_nn(time_x)
+        h = self.film_time(x, time_x)
+        h = self.dropout_input(h)
+        h = self.sig_act(self.encoder(h))
+        hf = self.ft_encoder(ft_x)
+        h = self.add_ft(h, hf, ft_n)
+        h = self.dropout_emb(h)
+        p = self.decoder(h)
+        if not self.training:
+            p = self.limiter(p)
+        return p
+
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        reg_loss += self.time_nn.get_reg_loss()
+        return reg_loss
+
+    def train(self, step, **kwargs):
+        r, p = getattr(self, f'train_step{step}', **kwargs)
+
+    def train_step1(self, x, time_x):
+        time_x = self.time_nn(time_x)
+        h = self.film_time(x, time_x)
+        h = self.dropout_input(h)
+        h = self.sig_act(self.encoder(h))
+        h = self.dropout_emb(h)
+        p = self.decoder(h)
+        return x, p
+
+    def train_step2(self, x, time_x, ft_x):
+        with torch.no_grad():
+            time_x = self.time_nn(time_x)
+            h = self.film_time(x, time_x)
+            h = self.sig_act(self.encoder(h))
+        hf = self.ft_encoder(ft_x)
+        return h, hf
+
+    def train_step3(self, x, time_x, ft_x, ft_n):
+        with torch.no_grad():
+            time_x = self.time_nn(time_x)
+            h = self.film_time(x, time_x)
+            h = self.dropout_input(h)
+            h = self.sig_act(self.encoder(h))
+            hf = self.ft_encoder(ft_x)
+        h = self.add_ft(h, hf, ft_n)
+        with torch.no_grad():
+            h = self.dropout_emb(h)
+            p = self.decoder(h)
+        return x, p

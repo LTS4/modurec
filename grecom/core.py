@@ -1,135 +1,85 @@
-import os
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 
-import h5py
-import numpy as np
 import torch.nn.functional as F
-from scipy.sparse import coo_matrix
-from torch import optim, tensor
+
+from torch import optim
 from tqdm import tqdm
 import pandas as pd
 
-from grecom.data import split_data
+from grecom.data import split_data, DataGenerator
 
 
-def _load_model_data(args, rating_type):
-    data = {}
-    f = h5py.File(os.path.join(args.data_path, "data.h5"), "r")
-    data['u_counts'] = f['ca_data']['user_counts'][:]
-    data['v_counts'] = f['ca_data']['item_counts'][:]
-    if rating_type == 'U':
-        data['input_size'] = len(data['v_counts'])
-        data['epoch_size'] = len(data['u_counts'])
-        data['row'] = f['cf_data']['row'][:]
-        data['col'] = f['cf_data']['col'][:]
-    else:
-        data['input_size'] = len(data['u_counts'])
-        data['epoch_size'] = len(data['v_counts'])
-        data['row'] = f['cf_data']['col'][:]
-        data['col'] = f['cf_data']['row'][:]
-    data['rating'] = f['cf_data']['rating'][:]
-    if 'time' in f['cf_data']:
-        data['time'] = {}
-        for key, value in f['cf_data']['time'].items():
-            data['time'][key] = value[:]
-    with h5py.File(os.path.join(
-            args.split_path, str(args.split_id), "train_mask.h5"), "r") as f:
-        data['train_mask'] = f["train_mask"][:]
-    return data
+def _get_input_sizes(data_gen):
+    kwargs = {}
+    kwargs['input_size'] = data_gen.data['input_size']
+    if data_gen.requires_fts:
+        kwargs['ft_size'] = (
+            x.shape[1] for x in data_gen.data['fts']
+        )
+    return kwargs
 
 
-class DataGenerator():
-    def __init__(self, data, args, use_time=False, max_mem=1e9):
-        self.use_time = use_time
-        self.args = args
-        self.batch_size = max_mem // data['input_size']
-        self.data = data
-        self.data_dense = None
-        if self.batch_size > data['epoch_size']:
-            self.data_dense = self.load_all_data()
-
-    def load_all_data(self):
-        dd_index = (self.data['row'], self.data['col'])
-        dd_shape = (self.data['epoch_size'], self.data['input_size'])
-        dd = {}
-        dd['x'] = coo_matrix(
-            (self.data['rating'], dd_index),
-            shape=dd_shape, dtype=np.float32).toarray()
-        if self.use_time:
-            x_time = np.stack([
-                coo_matrix(
-                    (value, dd_index), shape=dd_shape,
-                    dtype=np.float32).toarray()
-                for value in self.data['time'].values()
-            ])
-            dd['time'] = np.transpose(x_time, (1, 2, 0))
-        dd_mask = tuple(x[self.data['train_mask'] == 1] for x in dd_index)
-        dd['train_mask'] = coo_matrix(
-            (np.ones_like(dd_mask[0]), dd_mask),
-            shape=dd_shape, dtype=np.float32).toarray()
-        for key, value in dd.items():
-            dd[key] = tensor(value).to(self.args.device)
-        return dd
-
-    def next(self):
-        if self.data_dense is not None:
-            return self.data_dense
+def _get_model_kwargs(dd):
+    kwargs = {}
+    kwargs['x'] = dd['x'] * dd['train_mask']
+    if 'time' in dd:
+        kwargs['time_x'] = dd['time'] * dd['train_mask'].unsqueeze(-1)
+    if 'fts' in dd:
+        kwargs['ft_x'] = dd['fts']
+        kwargs['ft_n'] = dd['counts']
+    return kwargs
 
 
-def _get_training_pred(args, dd, model):
-    x_tr = dd['x'] * dd['train_mask']
-    if model.requires_time:
-        x_time = dd['time'] * dd['train_mask'].unsqueeze(-1)
-        pred = model(x_tr, x_time)
-        return pred
-    pred = model(x_tr)
-    return pred
-
-
-def train_val_batch(args, dd, model, epoch, reg):
-    model.train()
-    p = _get_training_pred(args, dd, model)
-    x_tr = dd['x'] * dd['train_mask']
-    loss = (
-        F.mse_loss(x_tr[x_tr != 0], p[x_tr != 0])
-        + model.get_reg_loss())
-    loss.backward()
-
-    model.eval()
-    if reg is None:
+def train_model(args, model_class, rating_type):
+    data_gen = DataGenerator(args, model_class, rating_type)
+    input_sizes = _get_input_sizes(data_gen)
+    model = model_class(args, **input_sizes)
+    data = data_gen.next()
+    ex = ThreadPoolExecutor()
+    for train_step in model.tr_steps:
         reg = pd.DataFrame({'epoch': [], 'tr_rmse': [], 'te_rmse': []})
-    p = _get_training_pred(args, dd, model)
-    x_te = dd['x'] * (1 - dd['train_mask'])
-    reg = reg.append({
-        'epoch': epoch,
-        'tr_rmse': F.mse_loss(x_tr[x_tr != 0], p[x_tr != 0]).item() ** (1/2),
-        'te_rmse': F.mse_loss(x_te[x_te != 0], p[x_te != 0]).item() ** (1/2)
-    }, ignore_index=True)
-    return reg
+        optimizer = optim.Adam(model.parameters(), args.lr)
+        scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=50, gamma=0.96)
+        for epoch in tqdm(range(args.epochs)):
+            th_data = ex.submit(data_gen.next)
+            optimizer.zero_grad()
+
+            model.train()
+            model_kwargs = _get_model_kwargs(data)
+            x, p = model.train(step=train_step, **model_kwargs)
+            loss = F.mse_loss(x[x != 0], p[x != 0]) + model.get_reg_loss()
+            loss.backward()
+
+            model.eval()
+            xt = data['x'] * (1 - data['train_mask'])
+            p = model(**model_kwargs)
+            reg = reg.append({
+                'epoch': epoch,
+                'tr_rmse': F.mse_loss(x[x != 0], p[x != 0]).item() ** (1/2),
+                'te_rmse': F.mse_loss(xt[xt != 0], p[xt != 0]).item() ** (1/2)
+            }, ignore_index=True)
+            if reg.te_rmse.min() == reg.iloc[-1].te_rmse:
+                pred = p.clone()
+            data = th_data.result()
+            optimizer.step()
+            scheduler.step()
+        print(reg.tail(20))
+        print(reg.te_rmse.min())
+    return x, xt, pred
 
 
 def train(args):
-    rating_type, model_str = args.model.split('-')
-    data = _load_model_data(args, rating_type)
     model_module = import_module(f"grecom.model")
-    model = getattr(model_module, model_str)(args, data['input_size'])
-    data_gen = DataGenerator(data, args, model.requires_time)
-    dd = data_gen.next()
-    reg = None
-    optimizer = optim.Adam(model.parameters(), args.lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
-    ex = ThreadPoolExecutor()
-    for epoch in tqdm(range(args.epochs)):
-        optimizer.zero_grad()
-        th_model = ex.submit(train_val_batch, *(args, dd, model, epoch, reg))
-        th_data = ex.submit(data_gen.next)
-        reg = th_model.result()
-        dd = th_data.result()
-        optimizer.step()
-        scheduler.step()
-    print(reg.tail(20))
-    print(reg.te_rmse.min())
+    Model = getattr(model_module, args.model)
+    x, xt, pred_v = train_model(args, Model, 'I')
+    _, _, pred_u = train_model(args, Model, 'U')
+    p = (pred_u + pred_v) / 2
+    print({
+        'tr_rmse': F.mse_loss(x[x != 0], p[x != 0]).item() ** (1/2),
+        'te_rmse': F.mse_loss(xt[xt != 0], p[xt != 0]).item() ** (1/2)
+    })
 
 
 def run_experiment(args):
