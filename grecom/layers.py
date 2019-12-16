@@ -57,11 +57,10 @@ class FilmLayer(nn.Module):
 class FeatureNN(nn.Module):
 
     def __init__(self, args):
-        super().__init__()
-        self.alpha_1 = nn.Parameter(1).to(args.device)
-        self.alpha_2 = nn.Parameter(1).to(args.device)
-        self.alpha_b = nn.Parameter(1).to(args.device)
-
+        super(FeatureNN, self).__init__()
+        self.alpha_1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_2 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_b = nn.Parameter(torch.FloatTensor(1).to(args.device))
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -71,12 +70,11 @@ class FeatureNN(nn.Module):
 
     def forward(self, h, hf, ft_n):
         A = torch.sigmoid(
-            self.alpha_1 * ft_n[0].expand(-1, ft_n[1].size(0)) +
-            self.alpha_2 * ft_n[1].expand(ft_n[0].size(1), -1) +
-            self.alpha_b
+            100*self.alpha_1 * torch.unsqueeze(ft_n, 1) +
+            100*self.alpha_b
         )
         A_zeros = torch.ones_like(A)
-        A_zeros[ft_n[0] == 0, :] = 0
-        A_zeros[:, ft_n[1] == 0] = 0
+        A_zeros[ft_n == 0, :] = 0
+        #A_zeros[:, ft_n[1] == 0] = 0
         A = A * A_zeros
         return h * A + hf * (1 - A)

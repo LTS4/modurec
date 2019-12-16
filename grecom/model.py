@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from grecom.layers import TimeNN, FilmLayer
+from grecom.layers import TimeNN, FilmLayer, FeatureNN
 
 
 class Autorec(nn.Module):
@@ -75,7 +75,7 @@ class AutorecPPP(nn.Module):
     tr_steps = 3
 
     def __init__(self, args, input_size, ft_size, rating_range=(1, 5)):
-        super(AutorecPP, self).__init__()
+        super(AutorecPPP, self).__init__()
         self.args = args
 
         self.time_nn = TimeNN(args, n_time_inputs=3)
@@ -87,8 +87,9 @@ class AutorecPPP(nn.Module):
         self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
-        self.ft_encoder = nn.Linear(ft_size, 500).to(args.device)
-        self.add_ft
+        self.ft_encoder1 = nn.Linear(ft_size[0], 1000).to(args.device)
+        self.ft_encoder2 = nn.Linear(1000, 500).to(args.device)
+        self.add_ft = FeatureNN(args)
 
     def forward(self, x, time_x, ft_x, ft_n):
         time_x = self.time_nn(time_x)
@@ -111,35 +112,36 @@ class AutorecPPP(nn.Module):
         reg_loss += self.time_nn.get_reg_loss()
         return reg_loss
 
-    def train(self, step, **kwargs):
-        r, p = getattr(self, f'train_step{step}', **kwargs)
+    def train_step(self, step, **kwargs):
+        return getattr(self, f'train_step{step}')(**kwargs)
 
-    def train_step1(self, x, time_x):
+    def train_step1(self, x, time_x, ft_x, ft_n):
         time_x = self.time_nn(time_x)
         h = self.film_time(x, time_x)
         h = self.dropout_input(h)
         h = self.sig_act(self.encoder(h))
         h = self.dropout_emb(h)
         p = self.decoder(h)
+        if not self.training:
+            p = self.limiter(p)
         return x, p
 
-    def train_step2(self, x, time_x, ft_x):
-        with torch.no_grad():
-            time_x = self.time_nn(time_x)
-            h = self.film_time(x, time_x)
-            h = self.sig_act(self.encoder(h))
-        hf = self.ft_encoder(ft_x)
+    def train_step2(self, x, time_x, ft_x, ft_n):
+        time_x = self.time_nn(time_x)
+        h = self.film_time(x, time_x)
+        h = self.sig_act(self.encoder(h))
+        hf = self.sig_act(self.ft_encoder1(ft_x[0]))
+        hf = self.sig_act(self.ft_encoder2(hf))
         return h, hf
 
     def train_step3(self, x, time_x, ft_x, ft_n):
-        with torch.no_grad():
-            time_x = self.time_nn(time_x)
-            h = self.film_time(x, time_x)
-            h = self.dropout_input(h)
-            h = self.sig_act(self.encoder(h))
-            hf = self.ft_encoder(ft_x)
-        h = self.add_ft(h, hf, ft_n)
-        with torch.no_grad():
-            h = self.dropout_emb(h)
-            p = self.decoder(h)
+        time_x = self.time_nn(time_x)
+        x0 = self.film_time(x, time_x)
+        h = self.sig_act(self.encoder(x0))
+        hf = self.sig_act(self.ft_encoder1(ft_x[0]))
+        hf = self.sig_act(self.ft_encoder2(hf))
+        h = self.add_ft(h, hf, (x0 != 0).sum(1))
+        p = self.decoder(h)
+        if not self.training:
+            p = self.limiter(p)
         return x, p
