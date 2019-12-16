@@ -37,62 +37,37 @@ def train_model(args, model_class, rating_type):
     model = model_class(args, **input_sizes)
     data = data_gen.next()
     ex = ThreadPoolExecutor()
-    for train_step in range(1, model.tr_steps + 1):
-        reg = pd.DataFrame({'epoch': [], 'tr_rmse': [], 'te_rmse': []})
-        print(filter(lambda p: p.requires_grad, model.parameters()))
-        optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), args.lr)
-        scheduler = optim.lr_scheduler.StepLR(
-            optimizer, step_size=50, gamma=0.96)
-        for epoch in tqdm(range(args.epochs)):
-            th_data = ex.submit(data_gen.next)
-            optimizer.zero_grad()
+    reg = pd.DataFrame({'epoch': [], 'tr_rmse': [], 'te_rmse': []})
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()), args.lr)
+    scheduler = optim.lr_scheduler.StepLR(
+        optimizer, step_size=50, gamma=0.96)
+    for epoch in tqdm(range(args.epochs)):
+        th_data = ex.submit(data_gen.next)
+        x = data['x'] * data['train_mask']
+        xt = data['x'] * (1 - data['train_mask'])
+        optimizer.zero_grad()
 
-            model.train()
-            model_kwargs = _get_model_kwargs(data)
-            x, p = model.train_step(step=train_step, **model_kwargs)
-            if train_step == 2:
-                loss = F.mse_loss(x, p) + model.get_reg_loss()
-            else:
-                loss = F.mse_loss(x[x != 0], p[x != 0]) + model.get_reg_loss()
-            loss.backward()
+        model.train()
+        model_kwargs = _get_model_kwargs(data)
+        p = model(**model_kwargs)
+        loss = F.mse_loss(x[x != 0], p[x != 0]) + model.get_reg_loss()
+        loss.backward()
 
-            model.eval()
-            x, p = model.train_step(step=train_step, **model_kwargs)
-            if train_step == 2:
-                reg = reg.append({
-                    'epoch': epoch,
-                    'tr_rmse': F.mse_loss(x, p).item() ** (1/2),
-                    'te_rmse': None
-                }, ignore_index=True)
-            else:
-                xt = data['x'] * (1 - data['train_mask'])
-                reg = reg.append({
-                    'epoch': epoch,
-                    'tr_rmse': F.mse_loss(x[x != 0], p[x != 0]).item() ** (1/2),
-                    'te_rmse': F.mse_loss(xt[xt != 0], p[xt != 0]).item() ** (1/2)
-                }, ignore_index=True)
-            if (reg.te_rmse.min() == reg.iloc[-1].te_rmse) and (train_step == model.tr_steps):
-                pred = p.clone()
-            data = th_data.result()
-            optimizer.step()
-            scheduler.step()
-        print(reg.tail(20))
-        print(reg.te_rmse.min())
-        if train_step == 1:
-            for p in model.encoder.parameters():
-                p.requires_grad = False
-            for p in model.time_nn.parameters():
-                p.requires_grad = False
-            for p in model.film_time.parameters():
-                p.requires_grad = False
-            for p in model.decoder.parameters():
-                p.requires_grad = False
-        elif train_step == 2:
-            for p in model.ft_encoder1.parameters():
-                p.requires_grad = False
-            for p in model.ft_encoder2.parameters():
-                p.requires_grad = False
-    print(model.add_ft.alpha_1, model.add_ft.alpha_b)
+        model.eval()
+        p = model(**model_kwargs)
+        reg = reg.append({
+            'epoch': epoch,
+            'tr_rmse': F.mse_loss(x[x != 0], p[x != 0]).item() ** (1/2),
+            'te_rmse': F.mse_loss(xt[xt != 0], p[xt != 0]).item() ** (1/2)
+        }, ignore_index=True)
+        if (reg.te_rmse.min() == reg.iloc[-1].te_rmse):
+            pred = p.clone()
+        data = th_data.result()
+        optimizer.step()
+        scheduler.step()
+    print(reg.tail(20))
+    print(reg.te_rmse.min())
     return x, xt, pred
 
 
@@ -100,7 +75,6 @@ def train(args):
     model_module = import_module(f"grecom.model")
     Model = getattr(model_module, args.model)
     x, xt, pred_v = train_model(args, Model, 'I')
-    return
     _, _, pred_u = train_model(args, Model, 'U')
     p = (pred_u.T + pred_v) / 2
     print({
