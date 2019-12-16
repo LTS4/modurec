@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 from sklearn.model_selection import train_test_split
 from scipy.sparse import coo_matrix
+import torch
 from torch import tensor
 
 
@@ -59,33 +60,32 @@ class DataGenerator():
         data = {}
         f = h5py.File(os.path.join(self.args.data_path, "data.h5"), "r")
         if self.rating_type == 'U':
-            data['input_size'] = len(data['v_counts'])
-            data['epoch_size'] = len(data['u_counts'])
             data['row'] = f['cf_data']['row'][:]
             data['col'] = f['cf_data']['col'][:]
+            data['counts'] = (
+                f['ca_data']['user_counts'][:],
+                f['ca_data']['item_counts'][:]
+            )
             if self.use_fts:
                 data['fts'] = (
                     f['ca_data']['user_fts'][:],
                     f['ca_data']['item_fts'][:]
                 )
-                data['counts'] = (
-                    f['ca_data']['user_counts'][:],
-                    f['ca_data']['item_counts'][:]
-                )
         else:
-            data['input_size'] = len(data['u_counts'])
-            data['epoch_size'] = len(data['v_counts'])
             data['row'] = f['cf_data']['col'][:]
             data['col'] = f['cf_data']['row'][:]
+            data['counts'] = (
+                f['ca_data']['item_counts'][:],
+                f['ca_data']['user_counts'][:]
+            )
             if self.use_fts:
                 data['fts'] = (
                     f['ca_data']['item_fts'][:],
                     f['ca_data']['user_fts'][:]
                 )
-                data['counts'] = (
-                    f['ca_data']['item_counts'][:],
-                    f['ca_data']['user_counts'][:]
-                )
+                
+        data['input_size'] = len(data['counts'][1])
+        data['epoch_size'] = len(data['counts'][0])
         data['rating'] = f['cf_data']['rating'][:]
         if self.use_time:
             data['time'] = {}
@@ -120,7 +120,13 @@ class DataGenerator():
             (np.ones_like(dd_mask[0]), dd_mask),
             shape=dd_shape, dtype=np.float32).toarray()
         for key, value in dd.items():
-            dd[key] = tensor(value).to(self.args.device)
+            if isinstance(value, tuple):
+                dd[key] = tuple(
+                    tensor(x, dtype=torch.float).to(self.args.device)
+                    for x in value)
+            else:
+                dd[key] = tensor(
+                    value, dtype=torch.float).to(self.args.device)
         return dd
 
     def next(self):
