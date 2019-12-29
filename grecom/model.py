@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 
-from grecom.layers import TimeNN, FilmLayer, FeatureNN
+from grecom.layers import TimeNN, FilmLayer, FeatureNN, GraphConv0D
 
 
 class Autorec(nn.Module):
     requires_time = False
     requires_fts = False
+    requires_graph = False
 
     def __init__(self, args, input_size, rating_range=(1, 5)):
         super(Autorec, self).__init__()
@@ -35,6 +36,7 @@ class Autorec(nn.Module):
 class AutorecPP(nn.Module):
     requires_time = True
     requires_fts = False
+    requires_graph = False
 
     def __init__(self, args, input_size, rating_range=(1, 5)):
         super(AutorecPP, self).__init__()
@@ -69,13 +71,55 @@ class AutorecPP(nn.Module):
         return reg_loss
 
 
-class AutorecPPP(nn.Module):
+class AutorecPPg(nn.Module):
+    requires_time = True
+    requires_fts = False
+    requires_graph = True
+
+    def __init__(self, args, input_size, rating_range=(1, 5)):
+        super().__init__()
+        self.args = args
+
+        self.time_nn = TimeNN(args, n_time_inputs=3)
+        self.film_time = FilmLayer(args)
+        self.dropout_input = nn.Dropout(0.7)
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
+        self.conv = GraphConv0D(args).to(args.device)
+        self.dropout_emb = nn.Dropout(0.5)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
+
+    def forward(self, x, time_x, graph):
+        graph = graph[0]
+        time_x = self.time_nn(time_x)
+        x = self.film_time(x, time_x)
+        x = self.dropout_input(x)
+        x = self.sig_act(self.encoder(x))
+        x = self.conv(x, graph.edge_index, graph.edge_weight)
+        x = self.dropout_emb(x)
+        p = self.decoder(x)
+        if not self.training:
+            p = self.limiter(p)
+        return p
+
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        reg_loss += self.time_nn.get_reg_loss()
+        return reg_loss
+
+
+class AutorecPPP2(nn.Module):
     requires_time = True
     requires_fts = True
+    requires_graph = False
     tr_steps = 3
 
     def __init__(self, args, input_size, ft_size, rating_range=(1, 5)):
-        super(AutorecPPP, self).__init__()
+        super(AutorecPPP2, self).__init__()
         self.args = args
 
         self.time_nn = TimeNN(args, n_time_inputs=3)

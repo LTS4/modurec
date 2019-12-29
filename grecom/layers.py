@@ -2,8 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
+from grecom.data.geometric import conv_norm
+from torch_geometric.nn import MessagePassing
+
 
 class TimeNN(nn.Module):
+    """Takes the [U, V, t] tensor, calculates affine functions for each of the
+    t [U, V] matrices and combines them linearly.
+    """
 
     def __init__(self, args, n_time_inputs=3):
         super(TimeNN, self).__init__()
@@ -35,6 +41,7 @@ class TimeNN(nn.Module):
 
 
 class FilmLayer(nn.Module):
+    """Combines two inputs with identical shape"""
 
     def __init__(self, args):
         super(FilmLayer, self).__init__()
@@ -55,6 +62,8 @@ class FilmLayer(nn.Module):
 
 
 class FeatureNN(nn.Module):
+    """Using the number of ratings as a variable, combines the feature and
+    the rating representations."""
 
     def __init__(self, args):
         super(FeatureNN, self).__init__()
@@ -75,6 +84,26 @@ class FeatureNN(nn.Module):
         )
         A_zeros = torch.ones_like(A)
         A_zeros[ft_n == 0, :] = 0
-        #A_zeros[:, ft_n[1] == 0] = 0
         A = A * A_zeros
         return h * A + hf * (1 - A)
+
+
+class GraphConv0D(MessagePassing):
+    def __init__(self, args):
+        super(GraphConv0D, self).__init__(aggr='add')  # "Add" aggregation.
+        self.weight = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.normal_(self.conv.weight, std=.01)
+
+    def forward(self, x, edge_index, edge_weight=None, size=None):
+        h = x * self.weight
+        norm = conv_norm(edge_index, x.size(0), edge_weight, x.dtype)
+        return self.propagate(edge_index, size=size, x=x, h=h, norm=norm)
+
+    def message(self, h_j, norm):
+        return norm.view(-1, 1) * h_j
+
+    def update(self, aggr_out, x):
+        return aggr_out + x
