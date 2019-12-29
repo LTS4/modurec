@@ -9,7 +9,7 @@ from torch import tensor
 
 
 def prepare_data(args):
-    """Preprocess data if necessary
+    """Preprocess data if necessary.
 
     :param args: Dictionary with execution arguments
     :type args: Namespace
@@ -25,6 +25,11 @@ def prepare_data(args):
 
 
 def split_data(args):
+    """Split data into train and test as defined by the execution parameters.
+
+    :param args: Dictionary with execution arguments
+    :type args: Namespace
+    """
     if args.split_type == 'predefined':
         data_module = import_module(f"grecom.data.{args.dataset}")
         getattr(data_module, 'split_predefined')(args)
@@ -45,90 +50,145 @@ def split_data(args):
 
 
 class DataGenerator():
-    def __init__(self, args, model_class, rating_type, max_mem=1e9):
+    """Loads batches with the data the model requires. If the data is small,
+    it is loaded entirely on RAM.
+    """
+
+    def __init__(self, args, model_class, rating_type, batch_size=None,
+                 max_mem=2e9):
+        """Default initialization.
+
+        :param args: Dictionary with execution arguments
+        :type args: Namespace
+        :param model_class: Model class with static attributes that define the
+        data required.
+        :type model_class: torch.nn.Module
+        :param rating_type: 'I' for item ratings, 'U' for user ratings.
+        :type rating_type: str
+        :param max_mem: RAM/VRAM maximum size. In practice, this only accounts
+        for one matrix of collaborative data. Defaults to 2 GB.
+        :type max_mem: int, optional
+        """
         self.args = args
         self.use_time = model_class.requires_time
         self.use_fts = model_class.requires_fts
+        self.use_graph = model_class.requires_graph
         self.rating_type = rating_type
         self.data = self.load_data_from_h5()
-        self.batch_size = max_mem // self.data['input_size']
+        self.input_size = self.data['input_size']
+        self.epoch_size = self.data['epoch_size']
+        if batch_size is None:
+            self.batch_size = (max_mem // (4 * self.input_size))  # float: 4
         self.data_dense = None
-        if self.batch_size > self.data['epoch_size']:
+        if self.batch_size > self.epoch_size:
             self.data_dense = self.create_dense_data()
+        else:
+            self.data_csr = self.create_csr_data()
+            self.prev_i = 0
 
     def load_data_from_h5(self):
+        """Loads the h5py data (collaborative data in COO format). Takes into
+        account the type of input (user or item ratings).
+
+        :return: Dictionary with the data loaded.
+        :rtype: dict
+        """
         data = {}
         f = h5py.File(os.path.join(self.args.data_path, "data.h5"), "r")
         if self.rating_type == 'U':
-            data['row'] = f['cf_data']['row'][:]
-            data['col'] = f['cf_data']['col'][:]
-            data['counts'] = (
-                f['ca_data']['user_counts'][:],
-                f['ca_data']['item_counts'][:]
-            )
-            if self.use_fts:
-                data['fts'] = (
-                    f['ca_data']['user_fts'][:],
-                    f['ca_data']['item_fts'][:]
-                )
+            indices = (f['cf_data']['row'][:], f['cf_data']['col'][:])
+            p = ('user', 'item')  # prefixes
         else:
-            data['row'] = f['cf_data']['col'][:]
-            data['col'] = f['cf_data']['row'][:]
-            data['counts'] = (
-                f['ca_data']['item_counts'][:],
-                f['ca_data']['user_counts'][:]
-            )
-            if self.use_fts:
-                data['fts'] = (
-                    f['ca_data']['item_fts'][:],
-                    f['ca_data']['user_fts'][:]
-                )
-                
+            indices = (f['cf_data']['col'][:], f['cf_data']['row'][:])
+            p = ('item', 'user')
         data['input_size'] = len(data['counts'][1])
         data['epoch_size'] = len(data['counts'][0])
-        data['rating'] = f['cf_data']['rating'][:]
+        shape = (data['epoch_size'], data['input_size'])
+        data['x'] = coo_matrix(
+            (f['cf_data']['rating'][:], indices),
+            shape=shape, dtype=np.float32)
+        if self.use_fts:
+            data['fts'] = (
+                f['ca_data'][f'{p[0]}_fts'][:],
+                f['ca_data'][f'{p[1]}_fts'][:]
+            )
+        if self.use_graph:
+            data['graph'] = (
+                {
+                    'edge_index': f['ca_data'][f'{p[0]}_graph_idx'][:],
+                    'weights': f['ca_data'][f'{p[0]}_graph_ws'][:]
+                },
+                {
+                    'edge_index': f['ca_data'][f'{p[1]}_graph_idx'][:],
+                    'weights': f['ca_data'][f'{p[1]}_graph_ws'][:]
+                }
+            )
         if self.use_time:
             data['time'] = {}
             for key, value in f['cf_data']['time'].items():
-                data['time'][key] = value[:]
+                data['time'][key] = coo_matrix(
+                    (value[:], indices), shape=shape, dtype=np.float32)
         with h5py.File(os.path.join(
                 self.args.split_path, str(self.args.split_id), "train_mask.h5"
         ), "r") as f:
-            data['train_mask'] = f["train_mask"][:]
+            mask = tuple(x[f["train_mask"][:] == 1] for x in indices)
+            data['train_mask'] = coo_matrix(
+                (np.ones_like(mask[0]), mask),
+                shape=shape, dtype=np.float32)
         return data
 
     def create_dense_data(self):
-        dd_index = (self.data['row'], self.data['col'])
-        dd_shape = (self.data['epoch_size'], self.data['input_size'])
-        dd = {}
-        dd['x'] = coo_matrix(
-            (self.data['rating'], dd_index),
-            shape=dd_shape, dtype=np.float32).toarray()
+        """Transforms the COO matrices into dense matrices.
+
+        :return: Dictionary with the data as dense matrices.
+        :rtype: dict
+        """
+        data = {}
+        data['x'] = self.data['x'].toarray()
         if self.use_time:
             x_time = np.stack([
-                coo_matrix(
-                    (value, dd_index), shape=dd_shape,
-                    dtype=np.float32).toarray()
-                for value in self.data['time'].values()
+                value.toarray() for value in self.data['time'].values()
             ])
-            dd['time'] = np.transpose(x_time, (1, 2, 0))
-        if self.use_fts:
-            dd['fts'] = self.data['fts']
-            dd['counts'] = self.data['counts']
-        dd_mask = tuple(x[self.data['train_mask'] == 1] for x in dd_index)
-        dd['train_mask'] = coo_matrix(
-            (np.ones_like(dd_mask[0]), dd_mask),
-            shape=dd_shape, dtype=np.float32).toarray()
-        for key, value in dd.items():
+            data['time'] = np.transpose(x_time, (1, 2, 0))
+        data['train_mask'] = self.data['train_mask'].toarray()
+        for key, value in data.items():
             if isinstance(value, tuple):
-                dd[key] = tuple(
+                data[key] = tuple(
                     tensor(x, dtype=torch.float).to(self.args.device)
                     for x in value)
             else:
-                dd[key] = tensor(
+                data[key] = tensor(
                     value, dtype=torch.float).to(self.args.device)
-        return dd
+        return data
+
+    def create_csr_data(self):
+        """Transforms the COO matrices into CSR matrices.
+
+        :return: Dictionary with the data as CSR matrices.
+        :rtype: dict
+        """
+        data = {}
+        for key, value in self.data.items():
+            if isinstance(value, coo_matrix):
+                data[key] = value.tocsr()
+            else:
+                data[key] = value
+        return data
 
     def next(self):
+        """Returns next batch.
+
+        :return: Dictionary with the data
+        :rtype: dict
+        """
         if self.data_dense is not None:
-            return self.data_dense
+            while True:
+                yield self.data_dense
+        while True:
+            for i in range(self.batch_size, self.epoch_size, self.batch_size):
+                row_indices = self.data_csr.x.indptr[self.prev_i:i]
+                prev_j = row_indices[0]
+                for j in row_indices[1:]:
+                    indices = self.data_csr.x.indices[prev_j:j]
+                    values = self.data_csr.x.data[prev_j:j]
+                yield None
