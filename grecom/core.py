@@ -1,16 +1,22 @@
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 
+import pandas as pd
 import torch.nn.functional as F
-
 from torch import optim
 from tqdm import tqdm
-import pandas as pd
 
-from grecom.data import split_data, DataGenerator
+from grecom.data import DataGenerator, split_data
 
 
 def _get_input_sizes(data_gen):
+    """Get parameters for model initialization.
+
+    :param data_gen: Data generator with input size and feature information
+    :type data_gen: DataGenerator
+    :return: Dictionary with the parameters
+    :rtype: dict
+    """
     kwargs = {}
     kwargs['input_size'] = data_gen.data['input_size']
     if data_gen.use_fts:
@@ -21,6 +27,13 @@ def _get_input_sizes(data_gen):
 
 
 def _get_model_kwargs(dd):
+    """Get parameters for model training/evaluation.
+
+    :param dd: Data batch returned by generator.
+    :type dd: dict
+    :return: Dictionary with the parameters
+    :rtype: dict
+    """
     kwargs = {}
     kwargs['x'] = dd['x'] * dd['train_mask']
     if 'time' in dd:
@@ -32,6 +45,17 @@ def _get_model_kwargs(dd):
 
 
 def train_model(args, model_class, rating_type):
+    """Train and evaluate the model at each epoch.
+
+    :param args: Dictionary with execution arguments
+    :type args: Namespace
+    :param model_class: Model class object
+    :type model_class: torch.nn.Module
+    :param rating_type: 'I' for item ratings, 'U' for user ratings.
+    :type rating_type: str
+    :return: Train, test and prediction data
+    :rtype: torch.Tensor
+    """
     data_gen = DataGenerator(args, model_class, rating_type)
     input_sizes = _get_input_sizes(data_gen)
     model = model_class(args, **input_sizes)

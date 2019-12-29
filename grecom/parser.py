@@ -22,6 +22,11 @@ def add_experiment_args(parser):
 
 
 def add_splitting_args(parser):
+    """Add parameters related with train-test splitting
+
+    :param parser: Parser object without the experiment parameters
+    :type parser: ArgumentParser
+    """
     parser.add_argument(
         '--split_type', required=True, type=str,
         choices=['predefined', 'random'],

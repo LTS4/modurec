@@ -201,7 +201,8 @@ def _remove_and_order_items(ids, item_fts, data_path):
             item_fts = np.delete(item_fts, i_f, axis=0)
             i_i += 1
         if i_i == len(ids):
-            item_fts = np.append(item_fts, np.zeros(1, item_fts.shape[1]), axis=0)
+            item_fts = np.append(
+                item_fts, np.zeros(1, item_fts.shape[1]), axis=0)
         elif key == ids[i_i]:
             i_i += 1
             i_f += 1
