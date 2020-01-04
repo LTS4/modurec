@@ -84,6 +84,7 @@ class DataGenerator():
             self.data_dense = self.create_dense_data()
         else:
             self.data_csr = self.create_csr_data()
+            self.i = self.batch_size
             self.prev_i = 0
 
     def load_data_from_h5(self):
@@ -101,8 +102,8 @@ class DataGenerator():
         else:
             indices = (f['cf_data']['col'][:], f['cf_data']['row'][:])
             p = ('item', 'user')
-        data['input_size'] = len(data['counts'][1])
-        data['epoch_size'] = len(data['counts'][0])
+        data['input_size'] = len(f['ca_data'][f'{p[1]}_counts'])
+        data['epoch_size'] = len(f['ca_data'][f'{p[0]}_counts'])
         shape = (data['epoch_size'], data['input_size'])
         data['x'] = coo_matrix(
             (f['cf_data']['rating'][:], indices),
@@ -116,11 +117,11 @@ class DataGenerator():
             data['graph'] = (
                 {
                     'edge_index': f['ca_data'][f'{p[0]}_graph_idx'][:],
-                    'weights': f['ca_data'][f'{p[0]}_graph_ws'][:]
+                    'edge_weight': f['ca_data'][f'{p[0]}_graph_ws'][:]
                 },
                 {
                     'edge_index': f['ca_data'][f'{p[1]}_graph_idx'][:],
-                    'weights': f['ca_data'][f'{p[1]}_graph_ws'][:]
+                    'edge_weight': f['ca_data'][f'{p[1]}_graph_ws'][:]
                 }
             )
         if self.use_time:
@@ -145,6 +146,8 @@ class DataGenerator():
         """
         data = {}
         data['x'] = self.data['x'].toarray()
+        if self.use_graph:
+            data['graph'] = self.data['graph']
         if self.use_time:
             x_time = np.stack([
                 value.toarray() for value in self.data['time'].values()
@@ -152,7 +155,19 @@ class DataGenerator():
             data['time'] = np.transpose(x_time, (1, 2, 0))
         data['train_mask'] = self.data['train_mask'].toarray()
         for key, value in data.items():
-            if isinstance(value, tuple):
+            # For graph key, we have a tuple of dicts with array values
+            if key == 'graph':
+                temp_list = []
+                for g in value:
+                    g['edge_index'] = tensor(
+                        g['edge_index'], dtype=torch.long
+                    ).to(self.args.device)
+                    g['edge_weight'] = tensor(
+                        g['edge_weight'], dtype=torch.float
+                    ).to(self.args.device)
+                    temp_list.append(g)
+                data[key] = tuple(temp_list)
+            elif isinstance(value, tuple):
                 data[key] = tuple(
                     tensor(x, dtype=torch.float).to(self.args.device)
                     for x in value)
@@ -175,20 +190,23 @@ class DataGenerator():
                 data[key] = value
         return data
 
-    def next(self):
+    def __iter__(self):
+        if self.data_dense is None:
+            self.i = self.batch_size
+            self.prev_i = 0
+        return self
+
+    def __next__(self):
         """Returns next batch.
 
         :return: Dictionary with the data
         :rtype: dict
         """
         if self.data_dense is not None:
-            while True:
-                yield self.data_dense
-        while True:
-            for i in range(self.batch_size, self.epoch_size, self.batch_size):
-                row_indices = self.data_csr.x.indptr[self.prev_i:i]
-                prev_j = row_indices[0]
-                for j in row_indices[1:]:
-                    indices = self.data_csr.x.indices[prev_j:j]
-                    values = self.data_csr.x.data[prev_j:j]
-                yield None
+            return self.data_dense
+        row_indices = self.data_csr.x.indptr[self.prev_i:i]
+        prev_j = row_indices[0]
+        for j in row_indices[1:]:
+            indices = self.data_csr.x.indices[prev_j:j]
+            values = self.data_csr.x.data[prev_j:j]
+        return None

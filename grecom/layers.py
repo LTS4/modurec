@@ -95,7 +95,7 @@ class GraphConv0D(MessagePassing):
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.normal_(self.conv.weight, std=.01)
+        init.normal_(self.weight, std=.01)
 
     def forward(self, x, edge_index, edge_weight=None, size=None):
         h = x * self.weight

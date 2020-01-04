@@ -40,7 +40,9 @@ def _get_model_kwargs(dd):
         kwargs['time_x'] = dd['time'] * dd['train_mask'].unsqueeze(-1)
     if 'fts' in dd:
         kwargs['ft_x'] = dd['fts']
-        kwargs['ft_n'] = dd['counts']
+        kwargs['ft_n'] = dd['counts']  # TODO: this will be a bug
+    if 'graph' in dd:
+        kwargs['graph'] = dd['graph']
     return kwargs
 
 
@@ -59,7 +61,7 @@ def train_model(args, model_class, rating_type):
     data_gen = DataGenerator(args, model_class, rating_type)
     input_sizes = _get_input_sizes(data_gen)
     model = model_class(args, **input_sizes)
-    data = data_gen.next()
+    data = next(data_gen)
     ex = ThreadPoolExecutor()
     reg = pd.DataFrame({'epoch': [], 'tr_rmse': [], 'te_rmse': []})
     optimizer = optim.Adam(
@@ -67,7 +69,7 @@ def train_model(args, model_class, rating_type):
     scheduler = optim.lr_scheduler.StepLR(
         optimizer, step_size=50, gamma=0.96)
     for epoch in tqdm(range(args.epochs)):
-        th_data = ex.submit(data_gen.next)
+        th_data = ex.submit(data_gen.__next__)
         x = data['x'] * data['train_mask']
         xt = data['x'] * (1 - data['train_mask'])
         optimizer.zero_grad()

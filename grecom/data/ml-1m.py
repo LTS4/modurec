@@ -7,6 +7,7 @@ import pandas as pd
 from torch_geometric.data import download_url, extract_zip
 
 from grecom.data.utils import get_reltime
+from grecom.data.geometric import create_similarity_graph
 
 import stanfordnlp
 import re
@@ -175,8 +176,11 @@ def preprocess_user_features(raw_path, data_path):
     user_fts[:, :2] = df_user[['gender', 'age']].values
     for i, j in enumerate(df_user['occupation'].values):
         user_fts[i, 2 + int(j)] = 1 / np.sqrt(2)
+    indices, weights = create_similarity_graph(user_fts)
     with h5py.File(os.path.join(data_path, "data.h5"), "a") as f:
         f['ca_data']['user_fts'] = user_fts
+        f['ca_data']['user_graph_idx'] = indices
+        f['ca_data']['user_graph_ws'] = weights
 
 
 def _remove_and_order_items(ids, item_fts, data_path):
@@ -271,8 +275,11 @@ def preprocess_item_features(raw_path, data_path):
     ids = np.array(ids)
     item_fts = np.vstack(item_fts)
     item_fts = _remove_and_order_items(ids, item_fts, data_path)
+    indices, weights = create_similarity_graph(item_fts)
     with h5py.File(os.path.join(data_path, "data.h5"), "a") as f:
         f['ca_data']["item_fts"] = item_fts
+        f['ca_data']['item_graph_idx'] = indices
+        f['ca_data']['item_graph_ws'] = weights
 
 
 def preprocess(args):

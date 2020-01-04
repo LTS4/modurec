@@ -96,7 +96,7 @@ class AutorecPPg(nn.Module):
         x = self.film_time(x, time_x)
         x = self.dropout_input(x)
         x = self.sig_act(self.encoder(x))
-        x = self.conv(x, graph.edge_index, graph.edge_weight)
+        x = self.conv(x, graph['edge_index'], graph['edge_weight'])
         x = self.dropout_emb(x)
         p = self.decoder(x)
         if not self.training:
