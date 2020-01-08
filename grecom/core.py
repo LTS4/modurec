@@ -39,8 +39,8 @@ def _get_model_kwargs(dd):
     if 'time' in dd:
         kwargs['time_x'] = dd['time'] * dd['train_mask'].unsqueeze(-1)
     if 'fts' in dd:
-        kwargs['ft_x'] = dd['fts']
-        kwargs['ft_n'] = dd['counts']  # TODO: this will be a bug
+        kwargs['ft_x'] = dd['ft_x']
+        kwargs['ft_n'] = dd['ft_n']
     if 'graph' in dd:
         kwargs['graph'] = dd['graph']
     return kwargs

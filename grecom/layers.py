@@ -61,14 +61,13 @@ class FilmLayer(nn.Module):
         return x
 
 
-class FeatureNN(nn.Module):
+class FeatureNN2(nn.Module):
     """Using the number of ratings as a variable, combines the feature and
     the rating representations."""
 
     def __init__(self, args):
-        super(FeatureNN, self).__init__()
+        super(FeatureNN2, self).__init__()
         self.alpha_1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
-        self.alpha_2 = nn.Parameter(torch.FloatTensor(1).to(args.device))
         self.alpha_b = nn.Parameter(torch.FloatTensor(1).to(args.device))
         self.reset_parameters()
 
@@ -79,7 +78,7 @@ class FeatureNN(nn.Module):
 
     def forward(self, h, hf, ft_n):
         A = torch.sigmoid(
-            100*self.alpha_1 * torch.unsqueeze(ft_n, 1) +
+            100*self.alpha_1 * torch.unsqueeze(ft_n[0], 1) +
             100*self.alpha_b
         )
         A_zeros = torch.ones_like(A)

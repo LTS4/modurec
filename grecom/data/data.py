@@ -3,7 +3,7 @@ import os
 import h5py
 import numpy as np
 from sklearn.model_selection import train_test_split
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csr_matrix
 import torch
 from torch import tensor
 
@@ -78,11 +78,14 @@ class DataGenerator():
         self.input_size = self.data['input_size']
         self.epoch_size = self.data['epoch_size']
         if batch_size is None:
-            self.batch_size = (max_mem // (4 * self.input_size))  # float: 4
+            self.batch_size = (max_mem // (4 * self.input_size))  # float = 4 B
         self.data_dense = None
         if self.batch_size > self.epoch_size:
             self.data_dense = self.create_dense_data()
         else:
+            if self.use_graph:
+                raise NotImplementedError(
+                    "Sparse graph convolutions not implemented")
             self.data_csr = self.create_csr_data()
             self.i = self.batch_size
             self.prev_i = 0
@@ -109,9 +112,13 @@ class DataGenerator():
             (f['cf_data']['rating'][:], indices),
             shape=shape, dtype=np.float32)
         if self.use_fts:
-            data['fts'] = (
+            data['ft_x'] = (
                 f['ca_data'][f'{p[0]}_fts'][:],
                 f['ca_data'][f'{p[1]}_fts'][:]
+            )
+            data['ft_n'] = (
+                f['ca_data'][f'{p[0]}_counts'][:],
+                f['ca_data'][f'{p[1]}_counts'][:]
             )
         if self.use_graph:
             data['graph'] = (
@@ -136,6 +143,20 @@ class DataGenerator():
             data['train_mask'] = coo_matrix(
                 (np.ones_like(mask[0]), mask),
                 shape=shape, dtype=np.float32)
+        return data
+
+    def create_csr_data(self):
+        """Transforms the COO matrices into CSR matrices.
+
+        :return: Dictionary with the data as CSR matrices.
+        :rtype: dict
+        """
+        data = {}
+        for key, value in self.data.items():
+            if isinstance(value, coo_matrix):
+                data[key] = value.tocsr()
+            else:
+                data[key] = value
         return data
 
     def create_dense_data(self):
@@ -176,18 +197,60 @@ class DataGenerator():
                     value, dtype=torch.float).to(self.args.device)
         return data
 
-    def create_csr_data(self):
-        """Transforms the COO matrices into CSR matrices.
-
-        :return: Dictionary with the data as CSR matrices.
-        :rtype: dict
-        """
+    def create_patch_data(self):
         data = {}
-        for key, value in self.data.items():
-            if isinstance(value, coo_matrix):
-                data[key] = value.tocsr()
-            else:
-                data[key] = value
+        data['input_size'] = tensor(
+            data['input_size'], dtype=torch.float).to(self.args.device)
+        data['epoch_size'] = tensor(
+            data['epoch_size'], dtype=torch.float).to(self.args.device)
+        shape = (self.batch_size, data['input_size'])
+        data_indptr = self.data_csr.x.indptr[self.prev_i:self.i]
+        indptr = data_indptr - data_indptr[0]
+        indices = self.data_csr.x.indices[data_indptr[0]:data_indptr[-1]]
+        tuple_data = (
+            self.data_csr.x.data[data_indptr[0]:data_indptr[-1]],
+            indices, indptr
+        )
+        data['x'] = tensor(
+            csr_matrix(tuple_data, shape=shape).toarray(),
+            dtype=torch.float).to(self.args.device)
+        if self.use_fts:
+            data['ft_x'] = (
+                tensor(
+                    data['ft_x'][0][self.prev_i:self.i], dtype=torch.float
+                ).to(self.args.device),
+                tensor(data['ft_x'][1], dtype=torch.float).to(self.args.device)
+            )
+            data['ft_n'] = (
+                tensor(
+                    data['ft_n'][0][self.prev_i:self.i], dtype=torch.float
+                ).to(self.args.device),
+                tensor(data['ft_n'][1], dtype=torch.float).to(self.args.device)
+            )
+        if self.use_time:
+            # The indices can be reused because: x_ij = 0 <-> time_ij = 0
+            data_time = (
+                value.data[data_indptr[0]:data_indptr[-1]]
+                for value in self.data_csr['time'].values()
+            )
+            x_time = np.stack([
+                csr_matrix((data, indices, indptr), shape=shape).toarray()
+                for data in data_time
+            ])
+            data['time'] = tensor(
+                np.transpose(x_time, (1, 2, 0)), dtype=torch.float
+            ).to(self.args.device)
+        # Train mask is sparser, so we cannot use the previous indices
+        mask = self.data_csr.train_mask
+        mask_indptr = mask.indptr[self.prev_i:self.i]
+        indptr = mask_indptr - mask_indptr[0]
+        indices = mask.indices[mask_indptr[0]:mask_indptr[-1]]
+        tuple_data = (
+            mask.data[mask_indptr[0]:mask_indptr[-1]], indices, indptr
+        )
+        data['train_mask'] = tensor(
+            csr_matrix(tuple_data, shape=shape).toarray(),
+            dtype=torch.float).to(self.args.device)
         return data
 
     def __iter__(self):
@@ -197,16 +260,18 @@ class DataGenerator():
         return self
 
     def __next__(self):
-        """Returns next batch.
+        """Returns next batch. Autoresets when finished.
 
         :return: Dictionary with the data
         :rtype: dict
         """
         if self.data_dense is not None:
             return self.data_dense
-        row_indices = self.data_csr.x.indptr[self.prev_i:i]
-        prev_j = row_indices[0]
-        for j in row_indices[1:]:
-            indices = self.data_csr.x.indices[prev_j:j]
-            values = self.data_csr.x.data[prev_j:j]
-        return None
+        data = self.create_patch_data()
+        # Update batch indices
+        self.prev_i = self.i
+        self.i = min(self.i + self.batch_size, self.epoch_size)
+        if self.prev_i == self.batch_size:
+            self.i = self.batch_size
+            self.prev_i = 0
+        return data

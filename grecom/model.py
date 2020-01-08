@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from grecom.layers import TimeNN, FilmLayer, FeatureNN, GraphConv0D
+from grecom.layers import TimeNN, FilmLayer, FeatureNN2, GraphConv0D
 
 
 class Autorec(nn.Module):
@@ -133,7 +133,7 @@ class AutorecPPP2(nn.Module):
 
         self.ft_encoder1 = nn.Linear(ft_size[0], 1000).to(args.device)
         self.ft_encoder2 = nn.Linear(1000, 500).to(args.device)
-        self.add_ft = FeatureNN(args)
+        self.add_ft = FeatureNN2(args)
 
     def forward(self, x, time_x, ft_x, ft_n):
         time_x = self.time_nn(time_x)
@@ -184,7 +184,7 @@ class AutorecPPP2(nn.Module):
         h = self.sig_act(self.encoder(x0))
         hf = self.sig_act(self.ft_encoder1(ft_x[0]))
         hf = self.sig_act(self.ft_encoder2(hf))
-        h = self.add_ft(h, hf, (x0 != 0).sum(1))
+        h = self.add_ft(h, hf, ft_n)
         p = self.decoder(h)
         if not self.training:
             p = self.limiter(p)
