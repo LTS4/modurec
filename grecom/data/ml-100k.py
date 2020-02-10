@@ -48,7 +48,7 @@ def _read_ratings(raw_path):
     colnames = ['user_id', 'item_id', 'rating', 'timestamp']
     ratings = pd.read_csv(
         os.path.join(raw_path, 'u.data'),
-        sep='\t', header=None, names=colnames)
+        sep='\t', header=None, names=colnames, engine='python')
     return ratings
 
 
@@ -65,6 +65,7 @@ def _process_id_mappings(ratings, data_path):
     """
     u_ids, u_counts = np.unique(ratings.user_id.values, return_counts=True)
     v_ids, v_counts = np.unique(ratings.item_id.values, return_counts=True)
+    # ar = absolute -> relative
     dict_user_ar = {id_: i for i, id_ in enumerate(u_ids)}
     dict_item_ar = {id_: i for i, id_ in enumerate(v_ids)}
     ratings['user_id'] = ratings['user_id'].map(dict_user_ar)
@@ -192,6 +193,7 @@ def preprocess_user_features(raw_path, data_path):
     df_user = _add_occupation(df_user, raw_path)
     df_user['gender'] = df_user.gender.map({'M': 0, 'F': 1})
     df_user['age'] = (df_user.age.astype(int) - 1) / 55
+    assert 'id' not in df_user.columns
     indices, weights = create_similarity_graph(df_user.values)
     with h5py.File(os.path.join(data_path, "data.h5"), "a") as f:
         f['ca_data']['user_fts'] = df_user.values

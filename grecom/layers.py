@@ -61,6 +61,58 @@ class FilmLayer(nn.Module):
         return x
 
 
+class ContentFiltering(torch.nn.Module):
+    def __init__(self, args, ft_sizes, emb_size=500):
+        super(ContentFiltering, self).__init__()
+        self.w_bilinear = nn.Parameter(
+            torch.FloatTensor(ft_sizes[0], ft_sizes[1]).to(args.device))
+        self.bias = nn.Parameter(torch.FloatTensor(1).to(args.device))
+
+        self.args = args
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.xavier_normal_(self.w_bilinear)
+        init.zeros_(self.bias)
+
+    def forward(self, ft_x):
+        return ft_x[0] @ self.w_bilinear @ ft_x[1].T + self.bias
+
+    def get_reg_loss(self):
+        return self.args.reg * (
+            torch.norm(self.w_bilinear) ** 2
+        )
+
+
+class FeatureCombiner(nn.Module):
+    """Using the number of ratings as a variable, combines the feature and
+    the rating representations."""
+
+    def __init__(self, args):
+        super(FeatureCombiner, self).__init__()
+        self.alpha_1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_2 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_b = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.zeros_(self.alpha_1)
+        init.zeros_(self.alpha_2)
+        init.zeros_(self.alpha_b)
+
+    def forward(self, h, hf, ft_n):
+        A = torch.sigmoid(
+            100*self.alpha_1 * ft_n[0].view(-1, 1).expand(-1, len(ft_n[1])) +
+            100*self.alpha_2 * ft_n[1].view(1, -1).expand(len(ft_n[0]), -1) +
+            100*self.alpha_b
+        )
+        A_zeros = torch.ones_like(A)
+        A_zeros[ft_n[0] == 0, :] = 0
+        A_zeros[:, ft_n[1] == 0] = 0
+        A = A * A_zeros
+        return h * A + hf * (1 - A)
+
+
 class FeatureNN2(nn.Module):
     """Using the number of ratings as a variable, combines the feature and
     the rating representations."""
@@ -73,7 +125,6 @@ class FeatureNN2(nn.Module):
 
     def reset_parameters(self):
         init.zeros_(self.alpha_1)
-        init.zeros_(self.alpha_2)
         init.zeros_(self.alpha_b)
 
     def forward(self, h, hf, ft_n):

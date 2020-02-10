@@ -12,6 +12,8 @@ def init_pytorch(args):
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     torch.manual_seed(args.torch_seed)
     if use_cuda:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.enabled = True
         args.device = torch.device("cuda:" + str(args.gpu))
         os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     else:

@@ -6,11 +6,15 @@ import numpy as np
 import pandas as pd
 from torch_geometric.data import download_url, extract_zip
 
-from grecom.data.utils import get_reltime
+from grecom.data.utils import get_reltime, load_matlab_file
 from grecom.data.geometric import create_similarity_graph
+import scipy.sparse as sp
+import stanfordnlp
+import re
+import string
 
-DATASET = 'ml-10m'
-URL = 'http://files.grouplens.org/datasets/movielens/ml-10m.zip'
+DATASET = 'yahoo_music'
+URL = 'https://github.com/riannevdberg/gc-mc/raw/master/gcmc/data/yahoo_music/training_test_dataset.mat'
 
 
 def initialize_data(data_path):
@@ -32,10 +36,7 @@ def download(raw_path):
     :param raw_path: download path
     :type raw_path: str
     """
-    path = download_url(URL, raw_path)
-    extract_zip(path, raw_path)
-    os.unlink(path)
-    os.rename(f'{raw_path}/ml-10M100K', f'{raw_path}/ml-10m')
+    path = download_url(URL, os.path.join(raw_path, DATASET))
 
 
 def _read_ratings(raw_path):
@@ -46,11 +47,8 @@ def _read_ratings(raw_path):
     :return: Dataframe with user/item ids, rating and timestamp
     :rtype: pandas.DataFrame
     """
-    colnames = ['user_id', 'item_id', 'rating', 'timestamp']
-    ratings = pd.read_csv(
-        os.path.join(raw_path, 'ratings.dat'),
-        sep='::', header=None, names=colnames, engine='python')
-    return ratings
+    return load_matlab_file(
+        os.path.join(raw_path, 'training_test_dataset.mat'), 'M')
 
 
 def _process_id_mappings(ratings, data_path):
@@ -64,8 +62,11 @@ def _process_id_mappings(ratings, data_path):
     :return: Dataframe with remapped user/item ids
     :rtype: pandas.DataFrame
     """
-    u_ids, u_counts = np.unique(ratings.user_id.values, return_counts=True)
-    v_ids, v_counts = np.unique(ratings.item_id.values, return_counts=True)
+    u_nodes = np.where(ratings)[0].astype(np.int64)
+    v_nodes = np.where(ratings)[1].astype(np.int64)
+    u_ids, u_counts = np.unique(u_nodes, return_counts=True)
+    v_ids, v_counts = np.unique(v_nodes, return_counts=True)
+    # ar = absolute -> relative
     dict_user_ar = {id_: i for i, id_ in enumerate(u_ids)}
     dict_item_ar = {id_: i for i, id_ in enumerate(v_ids)}
     ratings['user_id'] = ratings['user_id'].map(dict_user_ar)
@@ -89,36 +90,22 @@ def _create_rating_matrix(ratings, data_path):
     :param data_path: Path to save the processed data (.hdf5 file)
     :type data_path: str
     """
-    row = ratings.user_id.values
-    col = ratings.item_id.values
-    rating = ratings.rating.values
+    u_nodes = np.where(ratings)[0].astype(np.int64)
+    v_nodes = np.where(ratings)[1].astype(np.int64)
+    rating = ratings[np.where(ratings)]
+    u_unique, u_counts = np.unique(u_nodes, return_counts=True)
+    v_unique, v_counts = np.unique(v_nodes, return_counts=True)
+    print(u_unique[:100])
+    print(ratings.sum(1)[:100])
+    assert len(u_unique) == (u_unique[-1] + 1)
+    assert len(v_unique) == (v_unique[-1] + 1)
     with h5py.File(os.path.join(data_path, "data.h5"), "a") as f:
         f['cf_data']["row"] = row
         f['cf_data']['col'] = col
         f['cf_data']['rating'] = rating
-
-
-def _create_time_matrices(ratings, data_path):
-    """Saves the time matrices in COO format
-
-    :param ratings: Dataframe with timestamps
-    :type ratings: pandas.DataFrame
-    :param data_path: Path to save the processed data (.hdf5 file)
-    :type data_path: str
-    """
-    rt_global = (
-        ratings[['timestamp']]
-        .apply(get_reltime).timestamp.fillna(0.5).values)
-    rt_user = (
-        ratings.groupby('user_id').timestamp
-        .apply(get_reltime).fillna(0.5).values)
-    rt_item = (
-        ratings.groupby('item_id').timestamp
-        .apply(get_reltime).fillna(0.5).values)
     with h5py.File(os.path.join(data_path, "data.h5"), "a") as f:
-        f['cf_data']['time']['r_global'] = rt_global
-        f['cf_data']['time']['r_user'] = rt_user
-        f['cf_data']['time']['r_item'] = rt_item
+        f['ca_data']['user_counts'] = u_counts
+        f['ca_data']['item_counts'] = v_counts
 
 
 def process_rating_data(raw_path, data_path):
@@ -130,55 +117,25 @@ def process_rating_data(raw_path, data_path):
     :type data_path: str
     """
     ratings = _read_ratings(raw_path)
-    ratings = _process_id_mappings(ratings, data_path)
     _create_rating_matrix(ratings, data_path)
-    _create_time_matrices(ratings, data_path)
 
 
-def preprocess_user_features(data_path):
+def preprocess_user_features(raw_path, data_path):
     """Read and preprocess user features. It uses the age, gender
     and occupation.
 
+    :param raw_path: Raw path (unprocessed data)
+    :type raw_path: str
     :param data_path: Path of the processed data (.hdf5 file)
     :type data_path: str
     """
-    with open(os.path.join(data_path, "dict_user_ar.pickle"), "rb") as f:
-        dict_user_ar = pickle.load(f)
+    num_users = load_matlab_file(raw_path, 'M').shape[0]
+    user_fts = np.eye(num_users)
+    indices, weights = create_similarity_graph(user_fts)
     with h5py.File(os.path.join(data_path, "data.h5"), "a") as f:
-        f['ca_data']['user_fts'] = np.ones((len(dict_user_ar), 1))
-
-
-def _remove_and_order_items(ids, item_fts, data_path):
-    """Remove items with no rating information and order them
-
-    :param df_item: Item dataframe with id
-    :type df_item: pandas.DataFrame
-    :param data_path: Path of the processed data (.hdf5 file)
-    :type data_path: str
-    :return: User dataframe without new items
-    :rtype: pandas.DataFrame
-    """
-    with open(os.path.join(data_path, "dict_item_ar.pickle"), "rb") as f:
-        dict_item_ar = pickle.load(f)
-    sort_ids = np.argsort(ids)
-    ids = ids[sort_ids]
-    item_fts = item_fts[sort_ids, :]
-    i_i = 0
-    i_f = 0
-    for key in dict_item_ar.keys():
-        while key > ids[i_i] and i_i != len(ids):
-            item_fts = np.delete(item_fts, i_f, axis=0)
-            i_i += 1
-        if i_i == len(ids):
-            item_fts = np.append(
-                item_fts, np.zeros(1, item_fts.shape[1]), axis=0)
-        elif key == ids[i_i]:
-            i_i += 1
-            i_f += 1
-        elif key < ids[i_i]:
-            item_fts = np.insert(item_fts, i_f, 0, axis=0)
-            i_f += 1
-    return item_fts
+        f['ca_data']['user_fts'] = user_fts
+        f['ca_data']['user_graph_idx'] = indices
+        f['ca_data']['user_graph_ws'] = weights
 
 
 def preprocess_item_features(raw_path, data_path):
@@ -189,17 +146,7 @@ def preprocess_item_features(raw_path, data_path):
     :param data_path: Path of the processed data (.hdf5 file)
     :type data_path: str
     """
-    df = pd.read_csv(
-            os.path.join(raw_path, 'movies.dat'), sep=r'::', header=None,
-            names=['id', 'title', 'genres'], engine='python')
-    df = df.join(df.pop('genres').str.get_dummies('|'))
-    # extract year
-    df['year_norm'] = df.title.str.slice(-5, -1).astype(int) / 10
-    assert not (df.year_norm < (1800 / 10)).any()
-
-    ids = df.id.astype(int).values
-    item_fts = df.iloc[:, 3:].values
-    item_fts = _remove_and_order_items(ids, item_fts, data_path)
+    item_fts = load_matlab_file(path_dataset, 'W_tracks')
     indices, weights = create_similarity_graph(item_fts)
     with h5py.File(os.path.join(data_path, "data.h5"), "a") as f:
         f['ca_data']["item_fts"] = item_fts
@@ -219,5 +166,34 @@ def preprocess(args):
         download(args.raw_path)
     initialize_data(data_path)
     process_rating_data(raw_path, data_path)
-    preprocess_user_features(data_path)
+    preprocess_user_features(raw_path, data_path)
     preprocess_item_features(raw_path, data_path)
+
+
+def split_predefined(args):
+    """Loads test set, maps ids and creates a training mask.
+
+    :param args: Dictionary with execution arguments
+    :type args: Namespace
+    """
+    save_path = os.path.join(args.split_path, str(args.split_id))
+    if os.path.exists(save_path):
+        return
+    raw_path = os.path.join(args.raw_path, DATASET)
+    Otest = load_matlab_file(raw_path, 'Otest')
+    test_inds = np.array(
+        [[u, v] for u, v in zip(np.where(Otest)[0], np.where(Otest)[1])])
+    with h5py.File(os.path.join(args.data_path, "data.h5"), "r") as f:
+        row = f['cf_data']['row'][:]
+        col = f['cf_data']['col'][:]
+    train_mask = np.ones(len(row), dtype=int)
+    j = 0
+    for i in range(len(row)):
+        if (test_inds[j] == (row[i], col[i])).all():
+            j += 1
+            train_mask[i] = 0
+            if j == len(test_inds):
+                break
+    os.makedirs(save_path)
+    with h5py.File(os.path.join(save_path, "train_mask.h5"), "w") as f:
+        f["train_mask"] = train_mask

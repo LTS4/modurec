@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 
-from grecom.layers import TimeNN, FilmLayer, FeatureNN2, GraphConv0D
+from grecom.layers import (TimeNN, FilmLayer, ContentFiltering, 
+                           FeatureCombiner, GraphConv0D)
 
 
 class Autorec(nn.Module):
@@ -18,11 +19,13 @@ class Autorec(nn.Module):
         self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
-    def forward(self, x):
+    def forward(self, x, ft_n):
         x = self.sig_act(self.encoder(x))
         p = self.decoder(x)
         if not self.training:
             p = self.limiter(p)
+            p[torch.nonzero(ft_n[0] == 0), :] = ft_n[2]
+            p[:, torch.nonzero(ft_n[1] == 0)] = ft_n[2]
         return p
 
     def get_reg_loss(self):
@@ -33,13 +36,127 @@ class Autorec(nn.Module):
         return reg_loss
 
 
-class AutorecPP(nn.Module):
+class Autorec_D(nn.Module):
+    requires_time = False
+    requires_fts = False
+    requires_graph = False
+
+    def __init__(self, args, input_size, rating_range=(1, 5)):
+        super(Autorec_D, self).__init__()
+        self.args = args
+
+        self.dropout_input = nn.Dropout(0.7)
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
+        self.dropout_emb = nn.Dropout(0.5)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
+
+    def forward(self, x, ft_n):
+        x = self.dropout_input(x)
+        x = self.sig_act(self.encoder(x))
+        x = self.dropout_emb(x)
+        p = self.decoder(x)
+        if not self.training:
+            p = self.limiter(p)
+            p[torch.nonzero(ft_n[0] == 0), :] = ft_n[2]
+            p[:, torch.nonzero(ft_n[1] == 0)] = ft_n[2]
+        return p
+
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        return reg_loss
+
+
+class Autorec_DF(nn.Module):
+    requires_time = False
+    requires_fts = True
+    requires_graph = False
+
+    def __init__(self, args, input_size, rating_range=(1, 5)):
+        super(Autorec_DF, self).__init__()
+        self.args = args
+
+        self.dropout_input = nn.Dropout(0.7)
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
+        self.dropout_emb = nn.Dropout(0.5)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
+
+        self.ft_model = ContentFiltering(args, ft_size)
+        self.ft_comb = FeatureCombiner(args)
+
+    def forward(self, x, ft_n, ft_x):
+        hf = self.ft_model(ft_x)
+        h = self.ft_comb(x, hf, ft_n)
+        x = self.dropout_input(x)
+        x = self.sig_act(self.encoder(x))
+        x = self.dropout_emb(x)
+        p = self.decoder(x)
+        if not self.training:
+            p = self.limiter(p)
+            p[torch.nonzero(ft_n[0] == 0), :] = ft_n[2]
+            p[:, torch.nonzero(ft_n[1] == 0)] = ft_n[2]
+        return p
+
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        reg_loss += self.ft_model.get_reg_loss()
+        return reg_loss
+
+
+class Autorec_DG(nn.Module):
+    requires_time = False
+    requires_fts = False
+    requires_graph = True
+
+    def __init__(self, args, input_size, rating_range=(1, 5)):
+        super().__init__()
+        self.args = args
+
+        self.dropout_input = nn.Dropout(0.7)
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
+        self.conv = GraphConv0D(args).to(args.device)
+        self.dropout_emb = nn.Dropout(0.5)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
+
+    def forward(self, x, ft_n, graph):
+        graph = graph[0]
+        x = self.dropout_input(x)
+        x = self.sig_act(self.encoder(x))
+        x = self.conv(x, graph['edge_index'], graph['edge_weight'])
+        x = self.dropout_emb(x)
+        p = self.decoder(x)
+        if not self.training:
+            p = self.limiter(p)
+            p[torch.nonzero(ft_n[0] == 0), :] = ft_n[2]
+            p[:, torch.nonzero(ft_n[1] == 0)] = ft_n[2]
+        return p
+
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        return reg_loss
+
+
+class Autorec_DT(nn.Module):
     requires_time = True
     requires_fts = False
     requires_graph = False
 
     def __init__(self, args, input_size, rating_range=(1, 5)):
-        super(AutorecPP, self).__init__()
+        super(Autorec_DT, self).__init__()
         self.args = args
 
         self.time_nn = TimeNN(args, n_time_inputs=3)
@@ -51,8 +168,9 @@ class AutorecPP(nn.Module):
         self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
-    def forward(self, x, time_x):
+    def forward(self, x, ft_n, time_x):
         time_x = self.time_nn(time_x)
+        time_x = time_x * (x > 0)
         x = self.film_time(x, time_x)
         x = self.dropout_input(x)
         x = self.sig_act(self.encoder(x))
@@ -60,6 +178,8 @@ class AutorecPP(nn.Module):
         p = self.decoder(x)
         if not self.training:
             p = self.limiter(p)
+            p[torch.nonzero(ft_n[0] == 0), :] = ft_n[2]
+            p[:, torch.nonzero(ft_n[1] == 0)] = ft_n[2]
         return p
 
     def get_reg_loss(self):
@@ -71,7 +191,7 @@ class AutorecPP(nn.Module):
         return reg_loss
 
 
-class AutorecPPg(nn.Module):
+class Autorec_DGT(nn.Module):
     requires_time = True
     requires_fts = False
     requires_graph = True
@@ -90,9 +210,10 @@ class AutorecPPg(nn.Module):
         self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
-    def forward(self, x, time_x, graph):
+    def forward(self, x, ft_n, time_x, graph):
         graph = graph[0]
         time_x = self.time_nn(time_x)
+        time_x = time_x * (x > 0)
         x = self.film_time(x, time_x)
         x = self.dropout_input(x)
         x = self.sig_act(self.encoder(x))
@@ -101,6 +222,8 @@ class AutorecPPg(nn.Module):
         p = self.decoder(x)
         if not self.training:
             p = self.limiter(p)
+            p[torch.nonzero(ft_n[0] == 0), :] = ft_n[2]
+            p[:, torch.nonzero(ft_n[1] == 0)] = ft_n[2]
         return p
 
     def get_reg_loss(self):
@@ -112,14 +235,13 @@ class AutorecPPg(nn.Module):
         return reg_loss
 
 
-class AutorecPPP2(nn.Module):
+class Autorec_DFT(nn.Module):
     requires_time = True
     requires_fts = True
     requires_graph = False
-    tr_steps = 3
 
     def __init__(self, args, input_size, ft_size, rating_range=(1, 5)):
-        super(AutorecPPP2, self).__init__()
+        super(Autorec_DFT, self).__init__()
         self.args = args
 
         self.time_nn = TimeNN(args, n_time_inputs=3)
@@ -131,17 +253,17 @@ class AutorecPPP2(nn.Module):
         self.decoder = nn.Linear(500, input_size).to(args.device)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
-        self.ft_encoder1 = nn.Linear(ft_size[0], 1000).to(args.device)
-        self.ft_encoder2 = nn.Linear(1000, 500).to(args.device)
-        self.add_ft = FeatureNN2(args)
+        self.ft_model = ContentFiltering(args, ft_size)
+        self.ft_comb = FeatureCombiner(args)
 
     def forward(self, x, time_x, ft_x, ft_n):
         time_x = self.time_nn(time_x)
+        time_x = time_x * (x > 0)
         h = self.film_time(x, time_x)
+        hf = self.ft_model(ft_x)
+        h = self.ft_comb(h, hf, ft_n)
         h = self.dropout_input(h)
         h = self.sig_act(self.encoder(h))
-        hf = self.ft_encoder(ft_x)
-        h = self.add_ft(h, hf, ft_n)
         h = self.dropout_emb(h)
         p = self.decoder(h)
         if not self.training:
@@ -154,38 +276,54 @@ class AutorecPPP2(nn.Module):
             torch.norm(self.decoder.weight) ** 2
         )
         reg_loss += self.time_nn.get_reg_loss()
+        reg_loss += self.ft_model.get_reg_loss()
         return reg_loss
 
-    def train_step(self, step, **kwargs):
-        return getattr(self, f'train_step{step}')(**kwargs)
 
-    def train_step1(self, x, time_x, ft_x, ft_n):
+class Autorec_DFGT(nn.Module):
+    requires_time = True
+    requires_fts = True
+    requires_graph = True
+
+    def __init__(self, args, input_size, ft_size, rating_range=(1, 5)):
+        super(Autorec_DFGT, self).__init__()
+        self.args = args
+
+        self.time_nn = TimeNN(args, n_time_inputs=3)
+        self.film_time = FilmLayer(args)
+        self.dropout_input = nn.Dropout(0.7)
+        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.sig_act = nn.Sigmoid()
+        self.conv = GraphConv0D(args).to(args.device)
+        self.dropout_emb = nn.Dropout(0.5)
+        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
+
+        self.ft_model = ContentFiltering(args, ft_size)
+        self.ft_comb = FeatureCombiner(args)
+
+    def forward(self, x, time_x, ft_x, ft_n, graph):
+        graph = graph[0]
         time_x = self.time_nn(time_x)
+        time_x = time_x * (x > 0)
         h = self.film_time(x, time_x)
+        hf = self.ft_model(ft_x)
+        h = self.ft_comb(h, hf, ft_n)
         h = self.dropout_input(h)
         h = self.sig_act(self.encoder(h))
+        if graph['edge_index'].shape[0] == 2:
+            h = self.conv(h, graph['edge_index'], graph['edge_weight'])
         h = self.dropout_emb(h)
         p = self.decoder(h)
         if not self.training:
             p = self.limiter(p)
-        return x, p
+        return p
 
-    def train_step2(self, x, time_x, ft_x, ft_n):
-        time_x = self.time_nn(time_x)
-        h = self.film_time(x, time_x)
-        h = self.sig_act(self.encoder(h))
-        hf = self.sig_act(self.ft_encoder1(ft_x[0]))
-        hf = self.sig_act(self.ft_encoder2(hf))
-        return h, hf
-
-    def train_step3(self, x, time_x, ft_x, ft_n):
-        time_x = self.time_nn(time_x)
-        x0 = self.film_time(x, time_x)
-        h = self.sig_act(self.encoder(x0))
-        hf = self.sig_act(self.ft_encoder1(ft_x[0]))
-        hf = self.sig_act(self.ft_encoder2(hf))
-        h = self.add_ft(h, hf, ft_n)
-        p = self.decoder(h)
-        if not self.training:
-            p = self.limiter(p)
-        return x, p
+    def get_reg_loss(self):
+        reg_loss = self.args.reg / 2 * (
+            torch.norm(self.encoder.weight) ** 2 +
+            torch.norm(self.decoder.weight) ** 2
+        )
+        reg_loss += self.time_nn.get_reg_loss()
+        reg_loss += self.ft_model.get_reg_loss()
+        return reg_loss

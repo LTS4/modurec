@@ -19,6 +19,12 @@ def add_experiment_args(parser):
     parser.add_argument(
         '--preprocess', action='store_true', default=False,
         help='Preprocess data (even if exists)')
+    parser.add_argument(
+        '--warm_start', action='store_true', default=False,
+        help='Loads a pretrained model before training')
+    parser.add_argument(
+        '--eval', action='store_true', default=False,
+        help='Check already trained model')
 
 
 def add_splitting_args(parser):
@@ -49,7 +55,7 @@ def add_hardware_args(parser):
     :type parser: ArgumentParser
     """
     parser.add_argument(
-        '--no-cuda', action='store_true', default=False,
+        '--no_cuda', action='store_true', default=False,
         help='Disables CUDA training')
     parser.add_argument(
         '--gpu', type=int, default=0,
@@ -58,7 +64,7 @@ def add_hardware_args(parser):
         '--n_cores', type=int, default=-1,
         help='Number of cpu cores')
     parser.add_argument(
-        '--torch_seed', type=int, default=0,
+        '--torch_seed', type=int, default=1,
         help='Pytorch seed')
 
 
@@ -77,6 +83,10 @@ def add_hyperparameters(parser):
     parser.add_argument(
         '--reg', type=float, default=0.001,
         help='General regularization parameter')
+    parser.add_argument(
+        '--batch_size', type=int, default=0,
+        help='Batch size (0 = epoch size)'
+    )
 
 
 def add_path_args(parser):
@@ -86,16 +96,16 @@ def add_path_args(parser):
     :type parser: ArgumentParser
     """
     parser.add_argument(
-        '--raw-path', type=str, default='raw/',
+        '--raw_path', type=str, default='raw/',
         help='Path for the raw data')
     parser.add_argument(
-        '--data-path', type=str, default='data/',
+        '--data_path', type=str, default='data/',
         help='Path for the processed data')
     parser.add_argument(
-        '--models-path', type=str, default='models/',
+        '--models_path', type=str, default='models/',
         help='Path for the models')
     parser.add_argument(
-        '--results-path', type=str, default='results/',
+        '--results_path', type=str, default='results/',
         help='Path for the results')
 
 
