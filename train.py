@@ -82,24 +82,47 @@ def train_recom_net(recom_data, args):
 
 def train_gae_net(recom_data, args):
     # Create masks
-    non_zero = np.where(recom_data.rating_matrix != 0)
-    train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2)
-    val_inds, test_inds = train_test_split(val_inds, test_size=0.5)
-    if args.testing:
-        train_inds = np.concatenate([train_inds, val_inds])
-        val_inds = test_inds.copy()
+    if args.dataset == 'ml-100k':
+        train_df = pd.read_csv(
+            os.path.join(recom_data.raw_dir, 'u1.base'), sep='\t', header=None,
+                         names=['u', 'v', 'r', 't'], engine='python')
+        test_df = pd.read_csv(
+            os.path.join(recom_data.raw_dir, 'u1.test'), sep='\t', header=None,
+                         names=['u', 'v', 'r', 't'], engine='python')
+        train_inds = (
+            np.array([recom_data.dict_user_ar[x] for x in train_df.u]),
+            np.array([recom_data.dict_item_ar[x] for x in train_df.v]) - recom_data.n_users
+        )
+        val_inds = (
+            np.array([recom_data.dict_user_ar[x] for x in test_df.u]),
+            np.array([recom_data.dict_item_ar[x] for x in test_df.v]) - recom_data.n_users
+        )
+        train_mask = np.zeros_like(recom_data.rating_matrix)
+        train_mask[tuple(train_inds)] = 1
+        val_mask = np.zeros_like(recom_data.rating_matrix)
+        val_mask[tuple(val_inds)] = 1
+    elif args.dataset in ('douban'):
+        train_mask = recom_data.train_mask
+        val_mask = recom_data.test_mask
+    else:
+        non_zero = np.where(recom_data.rating_matrix != 0)
+        train_inds, val_inds = train_test_split(np.array(non_zero).T, test_size=0.2)
+        val_inds, test_inds = train_test_split(val_inds, test_size=0.5)
+        if args.testing:
+            train_inds = np.concatenate([train_inds, val_inds])
+            val_inds = test_inds.copy()
+        train_inds = train_inds.T
+        val_inds = val_inds.T
+        train_mask = np.zeros_like(recom_data.rating_matrix)
+        train_mask[tuple(train_inds)] = 1
+        val_mask = np.zeros_like(recom_data.rating_matrix)
+        val_mask[tuple(val_inds)] = 1
 
-    train_mask = np.zeros_like(recom_data.rating_matrix)
-    train_mask[tuple(train_inds.T)] = 1
-    val_mask = np.zeros_like(recom_data.rating_matrix)
-    val_mask[tuple(val_inds.T)] = 1
     model = GAENet(recom_data, train_mask, val_mask, args)
     optimizer = optim.Adam(model.parameters(), args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.96)
     results = pd.DataFrame()
-    min_val = {}
-    for key in ['u', 'v', 'u+v']:
-        min_val[key] = [0, np.inf]
+    min_val = {'u+v':[0,np.inf], 'u':[0,np.inf], 'v':[0,np.inf]}
     for epoch in tqdm(range(args.epochs)):
         t0 = time.time()
         # Training
@@ -126,21 +149,37 @@ def train_gae_net(recom_data, args):
         model.eval()
         with torch.no_grad():
             real_train, real_val = model.x_train, model.x_val
-            p_u, p_v = model(is_val=True)
-            pred_dict = {
-                'u': p_u, 'v': p_v, 'u+v': (p_u + p_v)/2
-            }
-            for key, pred in pred_dict.items():
-                train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)
-                val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
-                if val_loss < min_val[key][1]:
-                    min_val[key] = [epoch, val_loss]
-                results = results.append(
-                    {'epoch': epoch,
-                     'train_rmse': train_loss,
-                     'val_rmse': val_loss,
-                     'model': key},
-                    ignore_index=True)
+            pred, p_u, p_v = model(is_val=True)
+            train_loss = F.mse_loss(real_train[real_train != 0], pred[real_train != 0]).item() ** (1/2)
+            val_loss = F.mse_loss(real_val[real_val != 0], pred[real_val != 0]).item() ** (1/2)
+            if val_loss < min_val['u+v'][1]:
+                min_val['u+v'] = [epoch, val_loss]
+            results = results.append(
+                {'epoch': epoch,
+                 'train_rmse': train_loss,
+                 'val_rmse': val_loss,
+                 'model': 'u+v'},
+                ignore_index=True)
+            train_loss = F.mse_loss(real_train[real_train != 0], p_u[real_train != 0]).item() ** (1/2)
+            val_loss = F.mse_loss(real_val[real_val != 0], p_u[real_val != 0]).item() ** (1/2)
+            if val_loss < min_val['u'][1]:
+                min_val['u'] = [epoch, val_loss]
+            results = results.append(
+                {'epoch': epoch,
+                 'train_rmse': train_loss,
+                 'val_rmse': val_loss,
+                 'model': 'u'},
+                ignore_index=True)
+            train_loss = F.mse_loss(real_train[real_train != 0], p_v[real_train != 0]).item() ** (1/2)
+            val_loss = F.mse_loss(real_val[real_val != 0], p_v[real_val != 0]).item() ** (1/2)
+            if val_loss < min_val['v'][1]:
+                min_val['v'] = [epoch, val_loss]
+            results = results.append(
+                {'epoch': epoch,
+                 'train_rmse': train_loss,
+                 'val_rmse': val_loss,
+                 'model': 'v'},
+                ignore_index=True)
         scheduler.step()
     print(min_val)
     print("U|", model.user_ae.time_model, "time:", model.user_ae.film_time)

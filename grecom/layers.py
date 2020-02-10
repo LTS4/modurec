@@ -1,280 +1,159 @@
 import torch
-import torch.sparse
-from torch.nn import Parameter
-from torch.nn.init import xavier_normal_, zeros_
-from torch_scatter import scatter_add
-from torch_geometric.nn import MessagePassing
-import torch.nn.init as init
-import math
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.init as init
+
+from grecom.data.geometric import conv_norm
+from torch_geometric.nn import MessagePassing
 
 
-def conv_norm(edge_index, num_nodes, edge_weight=None, dtype=None, symmetric=True):
-    if edge_weight is None:
-        edge_weight = torch.ones((edge_index.size(1),), dtype=dtype,
-                                    device=edge_index.device)
+class TimeNN(nn.Module):
+    """Takes the [U, V, t] tensor, calculates affine functions for each of the
+    t [U, V] matrices and combines them linearly.
+    """
 
-    row, col = edge_index
-    deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
-    deg_inv_sqrt = deg.pow(-0.5)
-    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-    left_deg = deg_inv_sqrt[row] * edge_weight
-    if symmetric:
-        return left_deg * deg_inv_sqrt[col]  # symmetric norm
-    return left_deg
-
-
-class RecomConv(MessagePassing):
-    def __init__(self, in_channels, out_channels, args):
-        super(RecomConv, self).__init__(aggr='add')  # "Add" aggregation.
-        self.weight_sim = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
-        self.weight_rat = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
-        self.weight_self = xavier_normal_(Parameter(torch.Tensor(in_channels, out_channels).to(args.device)), gain=1)
-
-        self.bias = zeros_(Parameter(torch.Tensor(out_channels).to(args.device)))
-
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.args = args
-
-    def forward(self, edge_sim, edge_rat, x):
-        # TODO: improve performance by avoiding recalculation of normalizations
-        x_self = torch.matmul(x, self.weight_self)
-        x_sim = self.propagate(
-            x=torch.matmul(x, self.weight_sim),
-            edge_index=edge_sim,
-            norm=conv_norm(edge_sim, x.size(0), None, x.dtype))
-        x_rat = self.propagate(
-            x=torch.matmul(x, self.weight_rat),
-            edge_index=edge_rat,
-            norm=conv_norm(edge_rat, x.size(0), None, x.dtype))
-        return x_self + x_sim + x_rat + self.bias
-
-    def message(self, x_j, edge_index, norm):
-        # x_j has shape [E, out_channels]
-        return norm.view(-1, 1) * x_j
-
-    def update(self, aggr_out):
-        # aggr_out has shape [N, out_channels]
-        return aggr_out
-
-    def __repr__(self):
-        return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,
-                                   self.out_channels)
-
-
-class BilinearDecoder(torch.nn.Module):
-    def __init__(self, emb_size, mean_rating, args):
-        super(BilinearDecoder, self).__init__()
-        self.Q = Parameter(torch.eye(emb_size).to(args.device))
-        self.bias = Parameter(torch.Tensor([mean_rating]).to(args.device))
-
-    def forward(self, h1, h2):
-        return torch.sum((h1 @ self.Q) * h2, dim=1) + self.bias
-
-
-class GraphConv0D(MessagePassing):
-    def __init__(self, args):
-        super(GraphConv0D, self).__init__(aggr='add')  # "Add" aggregation.
-        self.weight = Parameter(torch.FloatTensor(1).to(args.device))
-
-    def forward(self, x, edge_index, edge_weight=None, size=None):
-        h = x * self.weight
-        return self.propagate(edge_index, size=size, x=x, h=h,
-                              norm=conv_norm(edge_index, x.size(0), edge_weight, x.dtype))
-
-    def message(self, h_j, norm):
-        return norm.view(-1, 1) * h_j
-
-    def update(self, aggr_out, x):
-        return aggr_out + x
-
-
-class GraphConv1D(MessagePassing):
-    def __init__(self, emb_size, args):
-        super(GraphConv1D, self).__init__(aggr='add')  # "Add" aggregation.
-        self.weight = Parameter(torch.FloatTensor(emb_size).to(args.device))
-
-    def forward(self, x, edge_index, edge_weight=None, size=None):
-        h = torch.matmul(x, torch.diag(self.weight))
-        return self.propagate(edge_index, size=size, x=x, h=h,
-                              norm=conv_norm(edge_index, x.size(0), edge_weight, x.dtype))
-
-    def message(self, h_j, norm):
-        return norm.view(-1, 1) * h_j
-
-    def update(self, aggr_out, x):
-        return aggr_out + x
-
-
-class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, input_size, args, emb_size=500, feature_matrices=None, time_matrix=None, time_ndim=0, feature_ndim=0):
-        super(GraphAutoencoder, self).__init__()
-
-        # FiLM time
-        self.time_matrix = time_matrix
-        if time_matrix is not None:
-            self.time_model = TimeNN(args, n_time_inputs=time_matrix.shape[-1])
-            self.time_ndim = time_ndim
-            film_size = {
-                0: 1,
-                1: input_size
-            }[time_ndim]
-            self.film_time = FiLMlayer(args, film_size)
-            
-        # FiLM features
-        self.feature_matrices = feature_matrices
-        if feature_matrices is not None:
-            ft_sizes = [x.size(1) for x in feature_matrices]
-            self.feature_model = FeatureNN(args, ft_sizes)
-            self.feature_ndim = feature_ndim
-            film_size = {
-                0: 1,
-                1: input_size
-            }[feature_ndim]
-            self.film_1 = FiLMlayer(args, film_size)
-            self.film_2 = FiLMlayer(args, film_size)
-        
-        # Autoencoder
-        self.wenc = Parameter(torch.Tensor(emb_size, input_size).to(args.device))
-        self.benc = Parameter(torch.Tensor(emb_size).to(args.device))
-        self.conv = GraphConv0D(args).to(args.device)
-        #self.conv = GraphConv1D(emb_size, args).to(args.device)
-        self.wdec = Parameter(torch.Tensor(input_size, emb_size).to(args.device))
-        self.bdec = Parameter(torch.Tensor(input_size).to(args.device))
-        #self.wdec_clf = Parameter(torch.Tensor(5, emb_size, input_size).to(args.device))
-        #self.bdec_clf = Parameter(torch.Tensor(1, input_size, 5).to(args.device))
-
-        self.dropout = nn.Dropout(p=0.7)
-        self.dropout2 = nn.Dropout(p=0.5)
-
-        self.weights_list = [self.wenc, self.wdec]
-        self.biases_list = [self.benc, self.bdec]
-        self.emb_size = emb_size
-        self.args = args
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        for w, b in zip(self.weights_list, self.biases_list):
-            init.kaiming_uniform_(w, a=math.sqrt(5))
-            fan_in, _ = init._calculate_fan_in_and_fan_out(w)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(b, -bound, bound)
-        init.normal_(self.conv.weight, std=.01)
-
-    def forward(self, x, edge_index, edge_weight=None, mask=None):
-        if mask is not None:
-            x = x[mask, :]
-        if self.time_matrix is not None:
-            if mask is not None:
-                time_comp = self.time_model(self.time_matrix[mask,...])
-            else:
-                time_comp = self.time_model(self.time_matrix)
-            x = self.film_time(x, time_comp, mask_add=(x > 0))
-        if self.feature_matrices is not None:
-            fts_1, fts_2 = self.feature_model(self.feature_matrices)
-            x = self.film_1(x, fts_1, mask_add=(x > 0))
-            x = self.film_2(x, fts_2, mask_add=(x > 0))
-        x = self.dropout(x)
-        x = F.linear(x, self.wenc, self.benc)
-        x = nn.Sigmoid()(x)
-        x = self.conv(x, edge_index, edge_weight)
-        x = self.dropout2(x)
-        p = F.linear(x, self.wdec, self.bdec)
-        return p
-
-    def get_reg_loss(self):
-        reg_loss = self.args.reg / 2 * (
-            torch.norm(self.wenc) ** 2 +
-            torch.norm(self.wdec) ** 2
-        )
-        if self.time_matrix is not None:
-            reg_loss += self.time_model.get_reg_loss()
-        if self.feature_matrices is not None:
-            reg_loss += self.feature_model.get_reg_loss()
-        return reg_loss
-
-
-class TimeNN(torch.nn.Module):
-    def __init__(self, args, emb_size=32, n_time_inputs=5):
+    def __init__(self, args, n_time_inputs=3):
         super(TimeNN, self).__init__()
-        self.w_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
-        self.b_aff = Parameter(torch.Tensor(n_time_inputs).to(args.device))
-        self.w_comb = Parameter(torch.Tensor(n_time_inputs).to(args.device))
+        self.w_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
+        self.b_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
+        self.w_comb = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
 
-        self.emb_size = emb_size
         self.args = args
         self.reset_parameters()
 
     def reset_parameters(self):
-        for w in [self.w_comb, self.w_aff, self.b_aff]:
-            init.normal_(w, std=0.1)
+        init.normal_(self.w_aff, std=0.1)
+        init.normal_(self.b_aff, std=0.1)
+        init.normal_(self.w_comb, std=0.1)
 
     def forward(self, x):
         x = x * self.w_aff + self.b_aff
-        x = nn.ReLU()(x)  # Allows deactivation of some time inputs
+        x = nn.ReLU()(x)
         p = torch.matmul(x, self.w_comb)
         return p
 
     def get_reg_loss(self):
         return self.args.reg * (
-            torch.norm(self.w_comb) ** 2 + 
-            torch.norm(self.w_aff) ** 2
+            torch.norm(self.w_comb) ** 2
         )
 
     def __repr__(self):
         return f"w_aff: {self.w_aff}, b_aff:{self.b_aff}, w_comb:{self.w_comb}"
 
 
-class FeatureNN(torch.nn.Module):
+class FilmLayer(nn.Module):
+    """Combines two inputs with identical shape"""
+
+    def __init__(self, args):
+        super(FilmLayer, self).__init__()
+        self.add_x1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.add_x2 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.mult_x = nn.Parameter(torch.FloatTensor(1).to(args.device))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.zeros_(self.add_x1)
+        init.normal_(self.add_x2, std=1e-4)
+        init.normal_(self.mult_x, std=1e-4)
+
+    def forward(self, x1, x2):
+        x = x1 * self.add_x1 + x2 * self.add_x2 + x1 * x2 * self.mult_x
+        return x
+
+
+class ContentFiltering(torch.nn.Module):
     def __init__(self, args, ft_sizes, emb_size=500):
-        super(FeatureNN, self).__init__()
-        self.w_u = Parameter(torch.FloatTensor(1, ft_sizes[0]).to(args.device))
-        self.b_u = Parameter(torch.FloatTensor(1).to(args.device))
-        self.w_v = Parameter(torch.FloatTensor(1, ft_sizes[1]).to(args.device))
-        self.b_v = Parameter(torch.FloatTensor(1).to(args.device))
+        super(ContentFiltering, self).__init__()
+        self.w_bilinear = nn.Parameter(
+            torch.FloatTensor(ft_sizes[0], ft_sizes[1]).to(args.device))
+        self.bias = nn.Parameter(torch.FloatTensor(1).to(args.device))
 
         self.args = args
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.xavier_normal_(self.w_u)
-        init.zeros_(self.b_u)
-        init.xavier_normal_(self.w_v)
-        init.zeros_(self.b_v)
+        init.xavier_normal_(self.w_bilinear)
+        init.zeros_(self.bias)
 
-    def forward(self, vec_x):
-        x_u, x_v = vec_x
-        x_u = F.linear(x_u, self.w_u, self.b_u)
-        x_v = F.linear(x_v, self.w_v, self.b_v).T
-        x_u = x_u.expand(-1, x_v.size(1))
-        x_v = x_v.expand(x_u.size(0), -1)
-        return x_u, x_v
+    def forward(self, ft_x):
+        return ft_x[0] @ self.w_bilinear @ ft_x[1].T + self.bias
 
     def get_reg_loss(self):
         return self.args.reg * (
-            torch.norm(self.w_u) ** 2 +
-            torch.norm(self.w_v) ** 2
+            torch.norm(self.w_bilinear) ** 2
         )
 
-class FiLMlayer(torch.nn.Module):
-    def __init__(self, args, size):
-        super(FiLMlayer, self).__init__()
-        self.mult = Parameter(torch.FloatTensor(size).to(args.device))
-        self.add = Parameter(torch.FloatTensor(size).to(args.device))
-        self.other = Parameter(torch.FloatTensor(size).to(args.device))
 
-        self.args = args
+class FeatureCombiner(nn.Module):
+    """Using the number of ratings as a variable, combines the feature and
+    the rating representations."""
+
+    def __init__(self, args):
+        super(FeatureCombiner, self).__init__()
+        self.alpha_1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_2 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_b = nn.Parameter(torch.FloatTensor(1).to(args.device))
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.zeros_(self.other)
-        init.normal_(self.mult, std=1e-4)
-        init.normal_(self.add, std=1e-4)
+        init.zeros_(self.alpha_1)
+        init.zeros_(self.alpha_2)
+        init.zeros_(self.alpha_b)
 
-    def forward(self, x, z, mask_add=1):
-        return (x * z * self.mult) + z * self.add * mask_add + x * self.other
+    def forward(self, h, hf, ft_n):
+        A = torch.sigmoid(
+            100*self.alpha_1 * ft_n[0].view(-1, 1).expand(-1, len(ft_n[1])) +
+            100*self.alpha_2 * ft_n[1].view(1, -1).expand(len(ft_n[0]), -1) +
+            100*self.alpha_b
+        )
+        A_zeros = torch.ones_like(A)
+        A_zeros[ft_n[0] == 0, :] = 0
+        A_zeros[:, ft_n[1] == 0] = 0
+        A = A * A_zeros
+        return h * A + hf * (1 - A)
 
-    def __repr__(self):
-        return f"m|a|o: {self.mult.item()}|{self.add.item()}|{self.other.item()}"
+
+class FeatureNN2(nn.Module):
+    """Using the number of ratings as a variable, combines the feature and
+    the rating representations."""
+
+    def __init__(self, args):
+        super(FeatureNN2, self).__init__()
+        self.alpha_1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_b = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.zeros_(self.alpha_1)
+        init.zeros_(self.alpha_b)
+
+    def forward(self, h, hf, ft_n):
+        A = torch.sigmoid(
+            100*self.alpha_1 * torch.unsqueeze(ft_n[0], 1) +
+            100*self.alpha_b
+        )
+        A_zeros = torch.ones_like(A)
+        A_zeros[ft_n == 0, :] = 0
+        A = A * A_zeros
+        return h * A + hf * (1 - A)
+
+
+class GraphConv0D(MessagePassing):
+    def __init__(self, args):
+        super(GraphConv0D, self).__init__(aggr='add')  # "Add" aggregation.
+        self.weight = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.normal_(self.weight, std=.01)
+
+    def forward(self, x, edge_index, edge_weight=None, size=None):
+        h = x * self.weight
+        norm = conv_norm(edge_index, x.size(0), edge_weight, x.dtype)
+        return self.propagate(edge_index, size=size, x=x, h=h, norm=norm)
+
+    def message(self, h_j, norm):
+        return norm.view(-1, 1) * h_j
+
+    def update(self, aggr_out, x):
+        return aggr_out + x
