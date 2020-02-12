@@ -155,7 +155,8 @@ def train_both_models(args, model_class):
     data_u = next(data_gen_u)
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, 
-            list(model_u.parameters()) + list(model_i.parameters())), args.lr)
+            list(model_u.parameters()) + list(model_i.parameters())), args.lr,
+        weight_decay=1e-3)
     scheduler = optim.lr_scheduler.StepLR(
         optimizer, step_size=50, gamma=0.96)
     init_epoch = 0
@@ -199,7 +200,7 @@ def train_both_models(args, model_class):
             model_i.train()
             model_kwargs = _get_model_kwargs(data_i)
             p = model_i(**model_kwargs)
-            loss = F.mse_loss(x[x != 0], p[x != 0]) + model_i.get_reg_loss()
+            loss = F.mse_loss(x[x != 0], p[x != 0]) #+ model_i.get_reg_loss()
             loss.backward()
             optimizer.step()
             with torch.no_grad():
@@ -253,7 +254,7 @@ def train_both_models(args, model_class):
             model_u.train()
             model_kwargs = _get_model_kwargs(data_u)
             p = model_u(**model_kwargs)
-            loss = F.mse_loss(x[x != 0], p[x != 0]) + model_u.get_reg_loss()
+            loss = F.mse_loss(x[x != 0], p[x != 0]) #+ model_u.get_reg_loss()
             loss.backward()
             optimizer.step()
             with torch.no_grad():

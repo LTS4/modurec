@@ -1,12 +1,64 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.init as init
 
 from grecom.data.geometric import conv_norm
 from torch_geometric.nn import MessagePassing
 
 
-class TimeNN(nn.Module):
+class TimeNN2Lbin(nn.Module): 
+
+    def __init__(self, args, n_time_inputs=3, n_bins=2):
+        super(TimeNN, self).__init__()
+        dim_inp = n_time_inputs * n_bins
+        self.n_bins = n_bins
+
+        self.relu = nn.ReLU()
+        self.lin1 = nn.Linear(dim_inp, 32)
+        self.lin2 = nn.Linear(32, 1)
+
+        self.args = args
+
+    def forward(self, x):
+        x = torch.floor(x * (self.n_bins - 1e-6)) # to map 1 to (n_bins - 1)
+        x = F.one_hot(x.to(torch.long), num_classes=self.n_bins)
+        x = x.view(x.shape[0], x.shape[1], -1).to(torch.float)
+        x = self.relu(self.lin1(x))
+        p = self.lin2(x)
+        return torch.squeeze(p)
+
+
+class TimeNN(nn.Module): #TimeNN2L
+
+    def __init__(self, args, n_time_inputs=3):
+        super(TimeNN, self).__init__()
+        self.w_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
+        self.b_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
+
+        self.relu = nn.ReLU()
+        self.lin1 = nn.Linear(n_time_inputs, 32)
+        self.lin2 = nn.Linear(32, 1)
+
+        self.args = args
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.normal_(self.w_aff, std=0.1)
+        init.normal_(self.b_aff, std=0.1)
+
+    def forward(self, x):
+        x = x * self.w_aff + self.b_aff
+        x = self.relu(x)
+        x = self.relu(self.lin1(x))
+        p = self.lin2(x)
+        return torch.squeeze(p)
+
+    def __repr__(self):
+        return f"w_aff: {self.w_aff}, b_aff:{self.b_aff}"
+
+
+class TimeNN1L(nn.Module):
     """Takes the [U, V, t] tensor, calculates affine functions for each of the
     t [U, V] matrices and combines them linearly.
     """
@@ -16,6 +68,9 @@ class TimeNN(nn.Module):
         self.w_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.b_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.w_comb = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
+
+        self.relu = nn.ReLU()
+        self.lin = nn.Linear(n_time_inputs, 1)
 
         self.args = args
         self.reset_parameters()
@@ -27,9 +82,9 @@ class TimeNN(nn.Module):
 
     def forward(self, x):
         x = x * self.w_aff + self.b_aff
-        x = nn.ReLU()(x)
-        p = torch.matmul(x, self.w_comb)
-        return p
+        x = self.relu(x)
+        p = self.lin(x)
+        return torch.squeeze(p)
 
     def get_reg_loss(self):
         return self.args.reg * (
