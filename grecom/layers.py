@@ -29,6 +29,36 @@ class TimeNN2Lbin(nn.Module):
         return torch.squeeze(p)
 
 
+class TimeNN2Lq(nn.Module):
+
+    def __init__(self, args, n_time_inputs=3):
+        super(TimeNN, self).__init__()
+        self.w_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
+        self.b_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
+
+        self.relu = nn.ReLU()
+        self.lin1 = nn.Linear(2 * n_time_inputs, 32)
+        self.lin2 = nn.Linear(32, 1)
+
+        self.args = args
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.normal_(self.w_aff, std=0.1)
+        init.normal_(self.b_aff, std=0.1)
+
+    def forward(self, x):
+        x = x * self.w_aff + self.b_aff
+        x = self.relu(x)
+        x = torch.cat([x, x**2], dim=2)
+        x = self.relu(self.lin1(x))
+        p = self.lin2(x)
+        return torch.squeeze(p)
+
+    def __repr__(self):
+        return f"w_aff: {self.w_aff}, b_aff:{self.b_aff}"
+
+
 class TimeNN(nn.Module): #TimeNN2L
 
     def __init__(self, args, n_time_inputs=3):

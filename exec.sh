@@ -7,4 +7,4 @@ python main.py \
 --reg 1e-4 \
 --same_split \
 --n_runs 10 \
---results_path results7/
+--results_path results8/

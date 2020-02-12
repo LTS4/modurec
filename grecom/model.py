@@ -159,7 +159,7 @@ class Autorec_DT(nn.Module):
         super(Autorec_DT, self).__init__()
         self.args = args
 
-        self.time_nn = TimeNN(args, n_time_inputs=2, n_bins=4)
+        self.time_nn = TimeNN(args, n_time_inputs=2)
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(0.7)
         self.encoder = nn.Linear(input_size, 500).to(args.device)
