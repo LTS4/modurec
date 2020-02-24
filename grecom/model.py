@@ -204,7 +204,7 @@ class Autorec_DGT(nn.Module):
         super().__init__()
         self.args = args
 
-        self.time_nn = TimeNN(args, n_time_inputs=3)
+        self.time_nn = TimeNN(args, n_time_inputs=2)
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(0.7)
         self.encoder = nn.Linear(input_size, 500).to(args.device)
@@ -216,7 +216,7 @@ class Autorec_DGT(nn.Module):
 
     def forward(self, x, ft_n, time_x, graph):
         graph = graph[0]
-        time_x = self.time_nn(time_x)
+        time_x = self.time_nn(time_x[...,:2])
         time_x = time_x * (x > 0)
         x = self.film_time(x, time_x)
         x = self.dropout_input(x)

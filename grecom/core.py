@@ -156,7 +156,7 @@ def train_both_models(args, model_class):
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, 
             list(model_u.parameters()) + list(model_i.parameters())), args.lr,
-        weight_decay=1e-3)
+        weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.StepLR(
         optimizer, step_size=50, gamma=0.96)
     init_epoch = 0
@@ -306,13 +306,14 @@ def train_both_models(args, model_class):
                 'sched_state_dict': scheduler.state_dict()
             }, os.path.join(models_path, f"B-{model_class.__name__}.tar")))
         scheduler.step()
+        if args.dataset == 'ml-10m':
+            reg.to_csv(f"{args.split_path}/log_{args.model}.csv", sep=';')
     res_i = reg_i.iloc[reg_i['te_rmse'].idxmin()]
     res_u = reg_u.iloc[reg_u['te_rmse'].idxmin()]
     res_b = reg.iloc[reg['te_rmse'].idxmin()]
     res = res_i.to_frame().T.append(res_u).append(res_b)
     res['rating_type'] = ['I','U','B']
     res['split_id'] = args.split_id
-    print(res)
     return res
 
 

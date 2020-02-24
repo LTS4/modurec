@@ -81,7 +81,7 @@ def add_hyperparameters(parser):
         '--epochs', type=int, default=100,
         help='Number of epochs to train (default: 100)')
     parser.add_argument(
-        '--reg', type=float, default=0.001,
+        '--weight_decay', type=float, default=1e-4,
         help='General regularization parameter')
     parser.add_argument(
         '--batch_size', type=int, default=0,

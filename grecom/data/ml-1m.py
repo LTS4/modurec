@@ -231,6 +231,8 @@ def preprocess_item_features(raw_path, data_path):
     genres_dict = {g: i for i, g in enumerate(all_genres)}
 
     # For movie title
+    if not os.path.exists('~/stanfordnlp_resources/en_ewt_models/en_ewt_tokenizer.pt'):
+        stanfordnlp.download('en')
     nlp = stanfordnlp.Pipeline(use_gpu=False, processors='tokenize,lemma')
     vocab = set()
     title_words = []
