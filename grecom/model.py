@@ -4,19 +4,23 @@ import torch.nn as nn
 from grecom.layers import (TimeNN, FilmLayer, ContentFiltering, 
                            FeatureCombiner, GraphConv0D)
 
+model_params = {'hidden_size': 500,
+                'dropout_input': 0.7,
+                'dropout_emb': 0.5}
+
 
 class Autorec(nn.Module):
     requires_time = False
     requires_fts = False
     requires_graph = False
 
-    def __init__(self, args, input_size, rating_range=(1, 5)):
+    def __init__(self, args, input_size, rating_range=(1, 5), model_params=model_params):
         super(Autorec, self).__init__()
         self.args = args
-
-        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        hidden = model_params['hidden_size']
+        self.encoder = nn.Linear(input_size, hidden)
         self.sig_act = nn.Sigmoid()
-        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.decoder = nn.Linear(hidden, input_size)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
     def forward(self, x, ft_n):
@@ -45,11 +49,11 @@ class Autorec_D(nn.Module):
         super(Autorec_D, self).__init__()
         self.args = args
 
-        self.dropout_input = nn.Dropout(0.7)
-        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.dropout_input = nn.Dropout(model_params['dropout_input'])
+        self.encoder = nn.Linear(input_size, model_params['hidden_size'])
         self.sig_act = nn.Sigmoid()
-        self.dropout_emb = nn.Dropout(0.5)
-        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.dropout_emb = nn.Dropout(model_params['dropout_emb'])
+        self.decoder = nn.Linear(model_params['hidden_size'], input_size)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
     def forward(self, x, ft_n):
@@ -158,19 +162,19 @@ class Autorec_DT(nn.Module):
     def __init__(self, args, input_size, rating_range=(1, 5)):
         super(Autorec_DT, self).__init__()
         self.args = args
-
         self.time_nn = TimeNN(args, n_time_inputs=2)
         self.film_time = FilmLayer(args)
-        self.dropout_input = nn.Dropout(0.7)
-        self.encoder = nn.Linear(input_size, 500).to(args.device)
+        self.dropout_input = nn.Dropout(model_params['dropout_input'])
+        self.encoder = nn.Linear(input_size, model_params['hidden_size'])
         self.sig_act = nn.Sigmoid()
-        self.dropout_emb = nn.Dropout(0.5)
-        self.decoder = nn.Linear(500, input_size).to(args.device)
+        self.dropout_emb = nn.Dropout(model_params['dropout_emb'])
+        self.decoder = nn.Linear(model_params['hidden_size'], input_size)
         self.limiter = nn.Hardtanh(rating_range[0], rating_range[1])
 
     def forward(self, x, ft_n, time_x):
-        time_x = self.time_nn(time_x[...,:2])
+        time_x = self.time_nn(time_x[..., :2])
         time_x = time_x * (x > 0)
+        # print(time_x)
         x = self.film_time(x, time_x)
         x = self.dropout_input(x)
         x = self.sig_act(self.encoder(x))
