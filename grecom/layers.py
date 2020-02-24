@@ -128,7 +128,7 @@ class TimeNN1L(nn.Module):
 class FilmLayer(nn.Module):
     """Combines two inputs with identical shape"""
 
-    def __init__(self, args):
+    def  __init__(self, args):
         super(FilmLayer, self).__init__()
         self.add_x1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
         self.add_x2 = nn.Parameter(torch.FloatTensor(1).to(args.device))
@@ -142,6 +142,7 @@ class FilmLayer(nn.Module):
         init.normal_(self.mult_x, std=1e-4)
 
     def forward(self, x1, x2):
+        """ x1 is the main input. It is modulated by x2."""
         x = x1 * self.add_x1 + x2 * self.add_x2 + x1 * x2 * self.mult_x
         return x
 
