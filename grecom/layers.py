@@ -170,6 +170,22 @@ class ContentFiltering(torch.nn.Module):
         )
 
 
+class FeatureCombiner_scal(nn.Module):
+    """Using the number of ratings as a variable, combines the feature and
+    the rating representations."""
+
+    def __init__(self, args):
+        super(FeatureCombiner_scal, self).__init__()
+        self.alpha = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.ones_(self.alpha)
+
+    def forward(self, h, hf, ft_n):
+        return h * self.alpha + hf * (1 - self.alpha)
+
+
 class FeatureCombiner(nn.Module):
     """Using the number of ratings as a variable, combines the feature and
     the rating representations."""
@@ -243,3 +259,34 @@ class GraphConv0D(MessagePassing):
 
     def update(self, aggr_out, x):
         return aggr_out + x
+
+
+class GraphConv0D_adaptive(MessagePassing):
+    def __init__(self, args):
+        super(GraphConv0D_adaptive, self).__init__(aggr='add')  # "Add" aggregation.
+        self.alpha_1 = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.alpha_b = nn.Parameter(torch.FloatTensor(1).to(args.device))
+        self.A = None
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.zeros_(self.alpha_1)
+        init.zeros_(self.alpha_b)
+
+    def forward(self, x, ft_n, edge_index, edge_weight=None, size=None):
+        A = torch.sigmoid(
+            100*self.alpha_1 * ft_n[0].view(-1, 1).expand(-1, x.shape[1]) +
+            100*self.alpha_b
+        )
+        A_zeros = torch.ones_like(A)
+        A_zeros[ft_n == 0, :] = 0
+        self.A = A * A_zeros
+        h = x
+        norm = conv_norm(edge_index, x.size(0), edge_weight, x.dtype)
+        return self.propagate(edge_index, size=size, x=x, h=h, norm=norm)
+
+    def message(self, h_j, norm):
+        return norm.view(-1, 1) * h_j
+
+    def update(self, aggr_out, x):
+        return x * self.A + aggr_out * (1 - self.A)
