@@ -94,7 +94,7 @@ class TimeNN1L(nn.Module):
     """
 
     def __init__(self, args, n_time_inputs=3):
-        super(TimeNN, self).__init__()
+        super(TimeNN1L, self).__init__()
         self.w_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.b_aff = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))
         self.w_comb = nn.Parameter(torch.Tensor(n_time_inputs).to(args.device))

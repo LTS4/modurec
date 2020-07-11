@@ -161,7 +161,7 @@ class Autorec_DT(nn.Module):
     def __init__(self, args, input_size, rating_range=(1, 5)):
         super(Autorec_DT, self).__init__()
         self.args = args
-        self.time_nn = TimeNN(args, n_time_inputs=2)
+        self.time_nn = TimeNN1L(args, n_time_inputs=2)
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(model_params['dropout_input'])
         self.encoder = nn.Linear(input_size, model_params['hidden_size'])
@@ -202,7 +202,7 @@ class Autorec_DGT(nn.Module):
         super().__init__()
         self.args = args
 
-        self.time_nn = TimeNN(args, n_time_inputs=2)
+        self.time_nn = TimeNN1L(args, n_time_inputs=2)
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(0.7)
         self.encoder = nn.Linear(input_size, 500).to(args.device)
@@ -318,6 +318,7 @@ class Autorec_DFT_scal(nn.Module):
             torch.norm(self.decoder.weight) ** 2
         )
         reg_loss += self.time_nn.get_reg_loss()
+        reg_loss += self.ft_model.get_reg_loss()
         return reg_loss
 
 
@@ -330,7 +331,7 @@ class Autorec_DFT(nn.Module):
         super(Autorec_DFT, self).__init__()
         self.args = args
 
-        self.time_nn = TimeNN(args, n_time_inputs=3)
+        self.time_nn = TimeNN1L(args, n_time_inputs=3)
         self.film_time = FilmLayer(args)
         self.dropout_input = nn.Dropout(0.7)
         self.encoder = nn.Linear(input_size, 500).to(args.device)
