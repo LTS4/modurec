@@ -198,15 +198,15 @@ class FeatureCombiner(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.zeros_(self.alpha_1)
-        init.zeros_(self.alpha_2)
-        init.zeros_(self.alpha_b)
+        init.ones_(self.alpha_1)
+        init.ones_(self.alpha_2)
+        init.ones_(self.alpha_b)
 
     def forward(self, h, hf, ft_n):
         A = torch.sigmoid(
-            100*self.alpha_1 * ft_n[0].view(-1, 1).expand(-1, len(ft_n[1])) +
-            100*self.alpha_2 * ft_n[1].view(1, -1).expand(len(ft_n[0]), -1) +
-            100*self.alpha_b
+            self.alpha_1 * ft_n[0].view(-1, 1).expand(-1, len(ft_n[1])) +
+            self.alpha_2 * ft_n[1].view(1, -1).expand(len(ft_n[0]), -1) +
+            self.alpha_b
         )
         A_zeros = torch.ones_like(A)
         A_zeros[ft_n[0] == 0, :] = 0
