@@ -1,6 +1,6 @@
 # Modurec: Recommender systems with feature and time modulation
 
-This is the source code to reproduce the experiments of the paper "[Efficient worker assignment in crowdsourced data labeling using graph signal processing](https://ieeexplore.ieee.org/abstract/document/8462493)" by Javier Maroto, Clément Vignac and Pascal Frossard.
+This is the source code to reproduce the experiments of the paper "[Modurec: Recommender systems with feature and time modulation](https://ieeexplore.ieee.org/abstract/document/9413676)" by Javier Maroto, Clément Vignac and Pascal Frossard.
 
 ## Usage
 
